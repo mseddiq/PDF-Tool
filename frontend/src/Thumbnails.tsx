@@ -34,6 +34,7 @@ function Thumbnail({
   return (
     <div
       ref={setNodeRef}
+      data-page-id={page.id}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={`thumbnail ${active ? "active" : ""}`}
     >
@@ -53,6 +54,7 @@ function Thumbnail({
       >
         <img
           loading="lazy"
+          style={{ aspectRatio: page.width / page.height, height: "auto" }}
           src={renderUrl(doc, page, 0.2)}
           alt={`Preview of page ${page.number}`}
         />

@@ -1,5 +1,7 @@
 # PDF Studio Pro
 
+Version **0.2.0** includes a feature review, existing-signature PNG export, repaired OCR, and expanded regression coverage. See [review findings](docs/REVIEW.md).
+
 A local React/TypeScript + FastAPI PDF workspace. Open real PDFs, replace supported native text using actual content redaction, organize pages, insert images/signatures, annotate, convert documents and run local OCR. No account, paid API, telemetry, remote fonts, or external document uploads.
 
 **This is an implemented development application, not a certification of production readiness.** Read [feature coverage and limitations](docs/FEATURES.md) before relying on complex documents or sensitive redactions. PyMuPDF is AGPL/commercial licensed; see [licensing](docs/LICENSES.md) before redistribution.
@@ -8,7 +10,7 @@ A local React/TypeScript + FastAPI PDF workspace. Open real PDFs, replace suppor
 
 **Easy Windows setup:** download the GitHub ZIP, extract it, and double-click `Setup-Windows.cmd`. After setup, use the **PDF Studio Pro** desktop shortcut or `Start-PDF-Studio.cmd`. No manual terminal commands are needed. See the [Windows step-by-step guide](docs/WINDOWS.md). The scripts have not yet been executed on Windows.
 
-Install Python 3.12+, Node.js 22+ (24 tested), [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) and [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html). Install `eng` and `ara` Tesseract language packs. The launch script detects the usual Program Files locations; otherwise add the binaries to PATH. Use a standard PowerShell terminal:
+Install Python 3.12+, Node.js 22+ (24 tested), [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) and [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html). The recommended Setup-Windows.cmd installs checksum-verified `eng` and `ara` data in your user-local app folder. If they are missing, double-click `Install-OCR-Languages.cmd`, then choose **Refresh OCR status** inside the app. The launch script detects the usual Program Files locations; otherwise add the binaries to PATH. Use a standard PowerShell terminal:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/install.ps1
@@ -39,12 +41,13 @@ Vite proxies `/api` to the loopback backend. The production build is served by F
 
 - Drop a PDF/DOCX on the dashboard, or choose Open. Encrypted PDFs prompt for their valid password.
 - Click a native text span. Edit text/style in Properties, then Apply. Font fallback is explicit, and too-wide text is rejected without changing the revision. Text selection boxes can be moved/resized through point coordinates in Properties. Larger new text blocks support multiple lines; native paragraphs do not reflow automatically.
-- Choose Add text, enter content and drag a box, then Insert. For images/signatures, upload or draw, then drag the placement rectangle. Undo removes inserted content. Visual signatures are not digital certificates.
+- To save an existing signature as PNG, choose **Extract signature PNG**, drag tightly around it, then download. Optional near-white paper removal makes the PNG transparent; it can remove faint marks. Select an embedded image and choose **Export selected image as PNG** to preserve its original pixel dimensions and alpha.
+- Choose Add text, enter content and drag a box, then Insert. For images, upload then drag the placement rectangle. Drawn, uploaded and typed signatures are placed on the current page immediately, ready to reposition. Undo removes inserted content. Visual signatures are not digital certificates.
 - Thumbnails support drag sorting, keyboard sorting (Space, arrows, Space), multi-selection, rotation, deletion, duplication and blank insertion. Add pages imports another PDF with an inclusion/order preview. Split/extract exports the checked pages; repeat for each desired range.
 - Annotation tools apply standard PDF annotations. Pick the tool, then drag; comments use the Text content field. Text replacements affect content streams; annotations are separate.
-- Convert runs local PDF-to-editable-DOCX reconstruction or LibreOffice DOCX rendering. OCR adds a searchable layer, reports per-page confidence and review text, and lets you open the result as a new document. Jobs are isolated, report progress and can be cancelled.
+- Convert runs local PDF-to-editable-DOCX reconstruction or LibreOffice DOCX rendering. OCR adds an invisible searchable layer while preserving the original page appearance, including scanned pages with native footers; it reports per-page confidence and review text, and lets you open the result as a new document. Jobs are isolated, report progress and can be cancelled.
 - Export / Ctrl+S downloads a new PDF. Source files are never overwritten. An optional export password encrypts the output. Undo/redo works across revisions and page operations.
-- Settings can delete the working document immediately. Working directories older than the retention window are removed on server startup; this is not secure disk erasure. Stop the service and remove `.studio-data` to clear all retained files.
+- Refreshing the browser restores the most recent local working copy. Settings can delete that document immediately. Working directories older than the retention window are removed on server startup; this is not secure disk erasure. Stop the service and remove `.studio-data` to clear all retained files.
 
 ## Validation
 
@@ -56,7 +59,7 @@ npm run build
 npm run test:e2e
 ```
 
-Set `CHROMIUM_PATH` to the installed Chromium executable for Playwright. The default is `/usr/bin/chromium`; browser tests currently assume Linux fixture generation. See [test coverage](docs/TESTING.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
+Set `CHROMIUM_PATH` to the installed Chromium executable for Playwright. The default on Linux is `/usr/bin/chromium`; Windows uses Playwright-managed Chromium unless CHROMIUM_PATH is specified. Run `npx playwright install chromium` in frontend to install that browser. See [test coverage](docs/TESTING.md), [architecture](docs/ARCHITECTURE.md), and [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Configuration
 

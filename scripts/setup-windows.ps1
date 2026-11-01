@@ -51,7 +51,7 @@ if ($extras -notmatch '^(n|no)$') {
     if (-not (Test-Path "$env:ProgramFiles\Tesseract-OCR\tesseract.exe") -and -not (Get-Command tesseract.exe -ErrorAction SilentlyContinue)) {
         Install-Package 'UB-Mannheim.TesseractOCR' 'https://tesseract-ocr.github.io/tessdoc/Installation.html'
     }
-    Write-Host 'If OCR language packs are missing, install eng/ara in Tesseract. See the Windows guide.'
+    & "$PSScriptRoot\install-ocr-languages.ps1"
 }
 & "$PSScriptRoot\install.ps1" -PythonExecutable $python
 $desktop = [Environment]::GetFolderPath('Desktop')

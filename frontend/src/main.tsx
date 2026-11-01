@@ -59,6 +59,7 @@ import {
 } from "./api";
 import Thumbnails from "./Thumbnails";
 import SelectionFrame from "./SelectionFrame";
+import SignatureDialog from "./SignatureDialog";
 import "./styles.css";
 
 type Tool =
@@ -75,6 +76,7 @@ type Tool =
   | "note"
   | "ink"
   | "signature"
+  | "extract_signature"
   | "crop"
   | "stamp";
 type Job = {
@@ -115,7 +117,6 @@ function App() {
     [text, setText] = useState(""),
     [fontSize, setFontSize] = useState(16),
     [fontFamily, setFontFamily] = useState<"helv" | "tiro" | "cour">("helv"),
-    [rememberSignature, setRememberSignature] = useState(false),
     [color, setColor] = useState("#273447"),
     [bold, setBold] = useState(false),
     [italic, setItalic] = useState(false),
@@ -124,6 +125,8 @@ function App() {
     [opacity, setOpacity] = useState(1);
   const [rect, setRect] = useState<Rect>([72, 72, 320, 130]),
     [asset, setAsset] = useState(""),
+    [assetPending, setAssetPending] = useState(false),
+    [textPending, setTextPending] = useState(false),
     [search, setSearch] = useState(""),
     [hits, setHits] = useState<{ page_id: string; rect: Rect }[]>([]),
     [job, setJob] = useState<Job | null>(null),
@@ -134,6 +137,11 @@ function App() {
       libreoffice: boolean;
       ocr_languages: string[];
       max_mb: number;
+      ocr?: {
+        available: boolean;
+        data_directory: string | null;
+        error: string | null;
+      };
     } | null>(null),
     [pendingFile, setPendingFile] = useState<File | null>(null),
     [importDoc, setImportDoc] = useState<DocumentState | null>(null),
@@ -141,16 +149,20 @@ function App() {
     [sideOpen, setSideOpen] = useState(true),
     [inspectorOpen, setInspectorOpen] = useState(false),
     [imageAngle, setImageAngle] = useState(0),
-    [behind, setBehind] = useState(false);
+    [behind, setBehind] = useState(false),
+    [pngDpi, setPngDpi] = useState(300),
+    [removeWhite, setRemoveWhite] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null),
     assetInput = useRef<HTMLInputElement>(null),
     importInput = useRef<HTMLInputElement>(null),
-    canvas = useRef<HTMLCanvasElement>(null),
     surface = useRef<HTMLDivElement>(null),
     drag = useRef<{ start: [number, number]; points: number[][] } | null>(null);
   const page = doc?.pages.find((p) => p.id === active) || doc?.pages[0];
   const adopt = useCallback((next: DocumentState) => {
     setDoc(next);
+    try {
+      localStorage.setItem("studio-last-document", next.id);
+    } catch {}
     setActive((old) =>
       next.pages.some((p) => p.id === old) ? old : next.pages[0]?.id || "",
     );
@@ -160,17 +172,44 @@ function App() {
     setSpan(null);
     setImageXref(null);
   }, []);
-  const run = useCallback(async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setError("");
+  const requestCount = useRef(0),
+    mutationFlight = useRef(false);
+  const run = useCallback(
+    async <T,>(fn: () => Promise<T>): Promise<T | undefined> => {
+      requestCount.current++;
+      setBusy(true);
+      setError("");
+      try {
+        return await fn();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        requestCount.current--;
+        setBusy(requestCount.current > 0);
+      }
+    },
+    [],
+  );
+  useEffect(() => {
+    let active = true;
+    let previous: string | null = null;
     try {
-      await fn();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+      previous = localStorage.getItem("studio-last-document");
+    } catch {}
+    if (previous)
+      api<DocumentState>(`/documents/${previous}`)
+        .then((state) => {
+          if (active) adopt(state);
+        })
+        .catch(() => {
+          try {
+            localStorage.removeItem("studio-last-document");
+          } catch {}
+        });
+    return () => {
+      active = false;
+    };
+  }, [adopt]);
   useEffect(() => {
     api<typeof health>("/health")
       .then(setHealth)
@@ -249,15 +288,29 @@ function App() {
   }, [message]);
   const mutate = useCallback(
     async (op: Operation) => {
-      if (!doc) return;
-      await run(async () => {
-        const next = await api<DocumentState>(
-          `/documents/${doc.id}/operations`,
-          json({ revision: doc.revision, operation: op }),
-        );
-        adopt(next);
-        setMessage("Changes saved to working copy");
-      });
+      if (!doc || mutationFlight.current) return;
+      mutationFlight.current = true;
+      try {
+        return await run(async () => {
+          const next = await api<DocumentState>(
+            `/documents/${doc.id}/operations`,
+            json({ revision: doc.revision, operation: op }),
+          );
+          adopt(next);
+          setMessage("Changes saved to working copy");
+          if (op.kind === "replace_image") {
+            setAssetPending(false);
+            setTool("select");
+          }
+          if (op.kind === "text") {
+            setTextPending(false);
+            setTool("select");
+          }
+          return next;
+        });
+      } finally {
+        mutationFlight.current = false;
+      }
     },
     [doc, run, adopt],
   );
@@ -277,18 +330,60 @@ function App() {
   );
   const save = useCallback(
     (subset = false) => {
-      if (!doc) return;
+      if (!doc || busy) return;
+      if (
+        assetPending ||
+        textPending ||
+        (span &&
+          (text !== span.text ||
+            rect.some((v, i) => Math.abs(v - span.rect[i]) > 0.1) ||
+            Math.abs(fontSize - span.size) > 0.1 ||
+            color !== span.color ||
+            bold !== !!(span.flags & 16) ||
+            italic !== !!(span.flags & 2) ||
+            underline ||
+            fontFamily !== "helv"))
+      ) {
+        setError(
+          "Apply the text edit or place the pending image before exporting. Escape cancels the selection.",
+        );
+        return;
+      }
       void run(async () => {
         await download(
           `/documents/${doc.id}/export`,
           doc.name.replace(/\.pdf$/i, "") + "-edited.pdf",
-          json({ page_ids: subset ? selected : null, password }),
+          json({
+            page_ids: subset
+              ? doc.pages
+                  .filter((p) => selected.includes(p.id))
+                  .map((p) => p.id)
+              : null,
+            password,
+          }),
         );
         setMessage("Export downloaded. Your original file is unchanged.");
         setModal("");
       });
     },
-    [doc, selected, password, run],
+    [
+      doc,
+      selected,
+      password,
+      run,
+      busy,
+      assetPending,
+      textPending,
+      span,
+      text,
+      rect,
+      fontSize,
+      color,
+      bold,
+      italic,
+      underline,
+      fontFamily,
+    ],
   );
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -296,6 +391,9 @@ function App() {
         setModal("");
         setSpan(null);
         setTool("select");
+        setAssetPending(false);
+        setTextPending(false);
+        setImageXref(null);
         return;
       }
       if (
@@ -340,6 +438,30 @@ function App() {
       }
     });
   }
+  useEffect(() => {
+    setAsset("");
+    setAssetPending(false);
+    setTextPending(false);
+    setHits([]);
+    setTool("select");
+    setSpan(null);
+    setImageXref(null);
+    setBehind(false);
+    setOpacity(1);
+    setText("");
+    setJob(null);
+  }, [doc?.id]);
+  useEffect(() => {
+    setSpan(null);
+    setImageXref(null);
+    setTextPending(false);
+  }, [page?.id]);
+  useEffect(() => {
+    if (modal === "ocr")
+      api<NonNullable<typeof health>>("/health")
+        .then(setHealth)
+        .catch((e) => setError(e.message));
+  }, [modal]);
   const chosen = selected.length ? selected : page ? [page.id] : [];
   const style = {
     text,
@@ -361,6 +483,7 @@ function App() {
     setBold(!!(s.flags & 16));
     setItalic(!!(s.flags & 2));
     setImageXref(null);
+    setUnderline(false);
   }
   function toDoc(x: number, y: number): [number, number] {
     if (!page || !surface.current) return [0, 0];
@@ -368,7 +491,16 @@ function App() {
     const px = ((x - r.left) / r.width) * page.width,
       py = ((y - r.top) / r.height) * page.height;
     const m = page.inverse;
-    return [px * m[0] + py * m[2] + m[4], px * m[1] + py * m[3] + m[5]];
+    return [
+      Math.max(
+        page.bounds[0],
+        Math.min(page.bounds[2], px * m[0] + py * m[2] + m[4]),
+      ),
+      Math.max(
+        page.bounds[1],
+        Math.min(page.bounds[3], px * m[1] + py * m[3] + m[5]),
+      ),
+    ];
   }
   function displayRect(r: Rect) {
     if (!page) return {};
@@ -414,13 +546,30 @@ function App() {
       Math.max(d.start[0], p[0]),
       Math.max(d.start[1], p[1]),
     ];
-    if (r[2] - r[0] < 3 || r[3] - r[1] < 3) {
+    d.points.push(p);
+    if (["line", "arrow", "ink"].includes(tool)) {
+      if (
+        Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) < 2 &&
+        d.points.length < 3
+      )
+        return;
+      r = [
+        Math.max(page.bounds[0], r[0] - 0.5),
+        Math.max(page.bounds[1], r[1] - 0.5),
+        Math.min(page.bounds[2], r[2] + 0.5),
+        Math.min(page.bounds[3], r[3] + 0.5),
+      ];
+    }
+    if (r[2] - r[0] < 1 || r[3] - r[1] < 1) {
       setMessage("Drag a rectangle on the page to place this object.");
       return;
     }
     setRect(r);
     setSpan(null);
-    if (tool === "text") return;
+    if (tool === "text") {
+      setTextPending(true);
+      return;
+    }
     if (tool === "image" || tool === "signature") {
       if (!asset) {
         setModal("image");
@@ -434,7 +583,16 @@ function App() {
         angle: imageAngle,
         opacity,
         behind,
+      }).then((next) => {
+        if (next) {
+          setAssetPending(false);
+          setTool("select");
+        }
       });
+      return;
+    }
+    if (tool === "extract_signature") {
+      setModal("extract_signature");
       return;
     }
     if (tool === "crop") {
@@ -460,13 +618,30 @@ function App() {
         body: form,
       });
       setAsset(a.id);
+      setAssetPending(true);
       setModal("");
-      setMessage("Image ready. Drag a rectangle on the page to place it.");
-      setTool("image");
+      setMessage(
+        imageXref
+          ? "Replacement ready. Click Replace resource to apply it."
+          : "Image ready. Drag a rectangle on the page to place it.",
+      );
+      setTool(imageXref ? "select" : "image");
     });
   }
   function startJob(kind: string) {
     if (!doc) return;
+    if (
+      kind === "ocr" &&
+      (!health?.ocr?.available ||
+        language
+          .split("+")
+          .some((code) => !health.ocr_languages.includes(code)))
+    ) {
+      setError(
+        "OCR is not ready. Check installed languages or run Install-OCR-Languages.cmd, then refresh status.",
+      );
+      return;
+    }
     void run(async () => {
       setJob(
         await api(`/documents/${doc.id}/jobs`, json({ kind, language, mode })),
@@ -483,27 +658,76 @@ function App() {
       setModal("merge");
     });
   }
-  function signaturePointer(
-    e: React.PointerEvent<HTMLCanvasElement>,
-    begin = false,
-  ) {
-    const c = canvas.current;
-    if (!c) return;
-    const ctx = c.getContext("2d")!;
-    const r = c.getBoundingClientRect(),
-      x = ((e.clientX - r.left) * c.width) / r.width,
-      y = ((e.clientY - r.top) * c.height) / r.height;
-    if (begin) {
-      c.setPointerCapture(e.pointerId);
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-    } else if (e.buttons) {
-      ctx.strokeStyle = "#172033";
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = "round";
-      ctx.lineTo(x, y);
-      ctx.stroke();
-    }
+  function signatureBox(ratio: number): Rect {
+    if (!page) return [72, 72, 252, 132];
+    const width = Math.min(200, page.width - 48),
+      height = Math.min(100, width / Math.max(0.1, ratio), page.height - 48);
+    const display: Rect = [
+      page.width - 24 - width,
+      page.height - 36 - height,
+      page.width - 24,
+      page.height - 36,
+    ];
+    const m = page.inverse;
+    const pts = [
+      [display[0], display[1]],
+      [display[2], display[3]],
+    ].map(([x, y]) => [x * m[0] + y * m[2] + m[4], x * m[1] + y * m[3] + m[5]]);
+    return [
+      Math.min(pts[0][0], pts[1][0]),
+      Math.min(pts[0][1], pts[1][1]),
+      Math.max(pts[0][0], pts[1][0]),
+      Math.max(pts[0][1], pts[1][1]),
+    ];
+  }
+  async function addSignatureImage(file: File): Promise<boolean> {
+    if (!doc || !page) return false;
+    return Boolean(
+      await run(async () => {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("signature", "true");
+        const asset = await api<{ id: string; width: number; height: number }>(
+          `/documents/${doc.id}/assets`,
+          { method: "POST", body: form },
+        );
+        const next = await mutate({
+          kind: "image",
+          page_id: page.id,
+          rect: signatureBox(asset.width / asset.height),
+          asset_id: asset.id,
+          angle: page.rotation,
+          opacity: 1,
+          behind: false,
+          signature: true,
+        });
+        if (!next) return false;
+        setAssetPending(false);
+        setTool("select");
+        setModal("");
+        setMessage("Signature placed on the page and ready to export.");
+        return true;
+      }),
+    );
+  }
+  async function addSignatureText(value: string): Promise<boolean> {
+    if (!page) return false;
+    const next = await mutate({
+      kind: "text",
+      page_id: page.id,
+      rect: signatureBox(3),
+      angle: page.rotation,
+      text: value,
+      font: "tiro",
+      italic: true,
+      font_size: Math.max(8, Math.min(26, 320 / Math.max(1, value.length))),
+      color: "#172033",
+    });
+    if (!next) return false;
+    setModal("");
+    setTool("select");
+    setMessage("Typed signature placed and ready to export.");
+    return true;
   }
   const tools: { id: Tool; label: string; icon: React.ReactNode }[] = [
     { id: "select", label: "Select & edit", icon: <MousePointer2 /> },
@@ -511,6 +735,11 @@ function App() {
     { id: "image", label: "Add image", icon: <ImageIcon /> },
     { id: "highlight", label: "Highlight", icon: <Highlighter /> },
     { id: "signature", label: "Signature", icon: <PenTool /> },
+    {
+      id: "extract_signature",
+      label: "Extract signature PNG",
+      icon: <Scissors />,
+    },
     { id: "rect", label: "Shape", icon: <Square /> },
     { id: "note", label: "Comment", icon: <MessageSquare /> },
   ];
@@ -612,6 +841,9 @@ function App() {
                 setCategory(c);
                 if (c === "Convert") setModal("convert");
                 if (c === "Sign") setModal("signature");
+                if (c === "Annotate") setTool("highlight");
+                if (c === "Edit PDF") setTool("select");
+                if (c === "Organize") setSideOpen(true);
                 if (c === "OCR") setModal("ocr");
                 if (c === "Protect") setModal("protect");
               }}
@@ -673,6 +905,7 @@ function App() {
                   onClick={() => {
                     setTool(t.id);
                     setSpan(null);
+                    setImageXref(null);
                     if (t.id === "image") assetInput.current?.click();
                     if (t.id === "signature") setModal("signature");
                   }}
@@ -799,7 +1032,7 @@ function App() {
                     ? "Organize your document"
                     : tool === "select"
                       ? "Click existing text to edit"
-                      : `Drag on the page to ${tool === "text" ? "place a text block" : tool === "crop" ? "crop the page" : `add ${tool}`}`}
+                      : `Drag on the page to ${tool === "text" ? "place a text block" : tool === "crop" ? "crop the page" : tool === "extract_signature" ? "select the signature to save as PNG" : `add ${tool}`}`}
                 </span>
                 <span>
                   Page {page?.number} of {doc.pages.length}
@@ -864,6 +1097,9 @@ function App() {
                           onClick={() => {
                             setImageXref(im.xref);
                             setRect(im.rect);
+                            setImageAngle(0);
+                            setOpacity(1);
+                            setBehind(false);
                             setSpan(null);
                           }}
                         />
@@ -958,6 +1194,20 @@ function App() {
                 )}
                 {imageXref ? (
                   <>
+                    <button
+                      className="wide-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(() =>
+                          download(
+                            `/documents/${doc.id}/pages/${page!.id}/images/${imageXref}`,
+                            "signature-image.png",
+                          ),
+                        )
+                      }
+                    >
+                      Export selected image as PNG
+                    </button>
                     <p className="hint">
                       Resource #{imageXref}. Replacing or deleting affects all
                       uses of a shared resource. Single-use images can be moved
@@ -1278,11 +1528,12 @@ function App() {
                   <button
                     onClick={() => {
                       const before = doc.size;
-                      void mutate({ kind: "compress" }).then(() =>
-                        setMessage(
-                          `Lossless rewrite requested. Previous size: ${(before / 1024).toFixed(1)} KB; current size shown below.`,
-                        ),
-                      );
+                      void mutate({ kind: "compress" }).then((next) => {
+                        if (next)
+                          setMessage(
+                            `Lossless compression: ${(before / 1024).toFixed(1)} KB before → ${(next.size / 1024).toFixed(1)} KB after${next.size >= before ? " (already optimized; no size reduction)" : ""}.`,
+                          );
+                      });
                     }}
                   >
                     <Download />
@@ -1303,23 +1554,31 @@ function App() {
                     Properties
                   </button>
                   <button
-                    onClick={() =>
+                    onClick={() => {
+                      const popup = window.open("about:blank", "_blank");
+                      if (!popup) {
+                        setError("Allow popups to open the printable PDF.");
+                        return;
+                      }
                       void run(async () => {
-                        const response = await fetch(
-                          `/api/documents/${doc.id}/export`,
-                          json({}),
-                        );
-                        if (!response.ok)
-                          throw new Error("Print preparation failed");
-                        const url = URL.createObjectURL(await response.blob());
-                        const w = window.open(url);
-                        if (!w)
-                          throw new Error(
-                            "Allow popups to open the printable PDF.",
+                        try {
+                          const response = await fetch(
+                            `/api/documents/${doc.id}/export`,
+                            json({}),
                           );
-                        setTimeout(() => URL.revokeObjectURL(url), 60000);
-                      })
-                    }
+                          if (!response.ok)
+                            throw new Error("Print preparation failed.");
+                          const url = URL.createObjectURL(
+                            await response.blob(),
+                          );
+                          popup.location.href = url;
+                          setTimeout(() => URL.revokeObjectURL(url), 60000);
+                        } catch (error) {
+                          popup.close();
+                          throw error;
+                        }
+                      });
+                    }}
                   >
                     <Printer />
                     Print PDF
@@ -1346,7 +1605,7 @@ function App() {
               <i>·</i>
               {(doc.size / 1024).toFixed(1)} KB<i>·</i>Revision {doc.revision}
             </span>
-            <span>PDF Studio Pro</span>
+            <span>PDF Studio Pro · 0.2.0</span>
           </footer>
         </>
       ) : (
@@ -1469,6 +1728,7 @@ function App() {
                     convert: "Convert documents",
                     ocr: "Make your PDF searchable",
                     signature: "Your signature",
+                    extract_signature: "Export signature as PNG",
                     export: "Export your document",
                     protect: "Password protection",
                     search: "Search document",
@@ -1585,9 +1845,28 @@ function App() {
                     value={language}
                     onChange={(e) => setLanguage(e.target.value)}
                   >
-                    <option value="eng">English</option>
-                    <option value="ara">Arabic</option>
-                    <option value="eng+ara">English + Arabic</option>
+                    <option
+                      value="eng"
+                      disabled={!health?.ocr_languages.includes("eng")}
+                    >
+                      English
+                    </option>
+                    <option
+                      value="ara"
+                      disabled={!health?.ocr_languages.includes("ara")}
+                    >
+                      Arabic
+                    </option>
+                    <option
+                      value="eng+ara"
+                      disabled={
+                        !["eng", "ara"].every((code) =>
+                          health?.ocr_languages.includes(code),
+                        )
+                      }
+                    >
+                      English + Arabic
+                    </option>
                   </select>
                 </label>
                 <p className="hint">
@@ -1595,11 +1874,48 @@ function App() {
                   {health?.ocr_languages.join(", ") || "Tesseract not detected"}
                 </p>
                 <button
-                  disabled={!doc || doc.kind !== "pdf"}
+                  disabled={
+                    busy ||
+                    !doc ||
+                    doc.kind !== "pdf" ||
+                    !health?.ocr?.available ||
+                    language
+                      .split("+")
+                      .some((code) => !health?.ocr_languages.includes(code))
+                  }
                   className="primary wide-button"
                   onClick={() => startJob("ocr")}
                 >
                   Run local OCR
+                </button>
+                {health?.ocr?.error && (
+                  <p className="inline-error">{health.ocr.error}</p>
+                )}
+                {language
+                  .split("+")
+                  .some((code) => !health?.ocr_languages.includes(code)) && (
+                  <p className="inline-error">
+                    Missing:{" "}
+                    {language
+                      .split("+")
+                      .filter((code) => !health?.ocr_languages.includes(code))
+                      .join(", ")}
+                    . Double-click Install-OCR-Languages.cmd in the app folder,
+                    then refresh status here.
+                  </p>
+                )}
+                <button
+                  className="wide-button"
+                  onClick={() =>
+                    void run(async () => {
+                      const result =
+                        await api<NonNullable<typeof health>>("/health");
+                      setHealth(result);
+                      setMessage("Local tool status refreshed");
+                    })
+                  }
+                >
+                  Refresh OCR status
                 </button>
               </>
             )}
@@ -1631,7 +1947,9 @@ function App() {
                   <button
                     className="wide-button"
                     onClick={() =>
-                      void api(`/jobs/${job.id}`, { method: "DELETE" })
+                      void run(() =>
+                        api(`/jobs/${job.id}`, { method: "DELETE" }),
+                      )
                     }
                   >
                     Cancel job
@@ -1660,6 +1978,10 @@ function App() {
                               const r = await fetch(
                                 `/api/jobs/${job.id}/download`,
                               );
+                              if (!r.ok)
+                                throw new Error(
+                                  "Could not open conversion result. Try downloading again.",
+                                );
                               await upload(
                                 new File([await r.blob()], "converted.pdf", {
                                   type: "application/pdf",
@@ -1676,120 +1998,96 @@ function App() {
                 )}
               </>
             )}
-            {modal === "signature" && (
+            {modal === "extract_signature" && (
               <>
                 <p>
-                  Draw a visual signature. This is not a cryptographically
-                  verified digital signature. Local reuse is optional and
-                  requires your consent.
+                  Save the selected area of your existing document as a PNG.
+                  This works for scanned, drawn, annotated, and embedded
+                  signatures. The PDF is not changed.
                 </p>
-                <canvas
-                  ref={canvas}
-                  width="700"
-                  height="220"
-                  onPointerDown={(e) => signaturePointer(e, true)}
-                  onPointerMove={(e) => signaturePointer(e)}
-                  aria-label="Draw signature"
-                />
-                <div className="modal-actions">
-                  <button
-                    onClick={() =>
-                      canvas.current
-                        ?.getContext("2d")
-                        ?.clearRect(0, 0, 700, 220)
-                    }
+                <label>
+                  PNG resolution
+                  <select
+                    value={pngDpi}
+                    onChange={(e) => setPngDpi(+e.target.value)}
                   >
-                    Clear
-                  </button>
-                  <button onClick={() => assetInput.current?.click()}>
-                    Upload PNG
-                  </button>
-                  <button
-                    className="primary"
-                    disabled={!doc}
-                    onClick={() =>
-                      canvas.current?.toBlob((blob) => {
-                        if (blob) {
-                          if (rememberSignature && canvas.current)
-                            localStorage.setItem(
-                              "studio-signature",
-                              canvas.current.toDataURL("image/png"),
-                            );
-                          void uploadAsset(
-                            new File([blob], "signature.png", {
-                              type: "image/png",
-                            }),
-                          );
-                        }
-                      })
-                    }
-                  >
-                    Use signature
-                  </button>
-                </div>
+                    <option value={144}>144 DPI</option>
+                    <option value={300}>300 DPI</option>
+                    <option value={600}>600 DPI</option>
+                  </select>
+                </label>
                 <label className="check-label">
                   <input
                     type="checkbox"
-                    checked={rememberSignature}
-                    onChange={(e) => setRememberSignature(e.target.checked)}
+                    checked={removeWhite}
+                    onChange={(e) => setRemoveWhite(e.target.checked)}
                   />
-                  Save this drawn signature in this browser for reuse
+                  Make near-white paper transparent
                 </label>
-                {localStorage.getItem("studio-signature") && (
-                  <div className="modal-actions">
-                    <button
-                      disabled={!doc}
-                      onClick={() =>
-                        void run(async () => {
-                          const r = await fetch(
-                            localStorage.getItem("studio-signature")!,
-                          );
-                          await uploadAsset(
-                            new File([await r.blob()], "signature.png", {
-                              type: "image/png",
-                            }),
-                          );
-                        })
-                      }
-                    >
-                      Reuse saved signature
-                    </button>
-                    <button
-                      onClick={() => {
-                        localStorage.removeItem("studio-signature");
-                        setMessage("Saved signature removed");
-                      }}
-                    >
-                      Delete saved signature
-                    </button>
-                  </div>
-                )}
-                <label>
-                  Or type your signature
-                  <input
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    dir="auto"
-                  />
-                </label>
+                <p className="hint">
+                  Transparency can remove very light marks. Leave it off to
+                  preserve the selected appearance.
+                </p>
+                <button
+                  className="primary wide-button"
+                  disabled={busy || !doc || !page}
+                  onClick={() =>
+                    void run(async () => {
+                      await download(
+                        `/documents/${doc!.id}/pages/${page!.id}/region-png`,
+                        "signature.png",
+                        json({
+                          revision: doc!.revision,
+                          rect,
+                          dpi: pngDpi,
+                          remove_white: removeWhite,
+                        }),
+                      );
+                      setMessage(
+                        "Signature region downloaded as PNG. The PDF is unchanged.",
+                      );
+                      setModal("");
+                      setTool("select");
+                    })
+                  }
+                >
+                  Download signature PNG
+                </button>
                 <button
                   className="wide-button"
-                  disabled={!doc || !text}
                   onClick={() => {
-                    setTool("text");
-                    setFontSize(26);
-                    setItalic(true);
-                    setSpan(null);
+                    setTool("extract_signature");
                     setModal("");
+                    setMessage(
+                      "Drag a rectangle closely around your existing signature.",
+                    );
                   }}
                 >
-                  Use typed signature
+                  Select a different region
                 </button>
-                <p className="hint">
-                  After choosing, drag a rectangle on the PDF to position your
-                  signature. Undo removes a placed signature.
-                </p>
               </>
+            )}
+            {modal === "signature" && (
+              <SignatureDialog
+                disabled={busy || !doc || doc.kind !== "pdf"}
+                onImage={addSignatureImage}
+                onText={addSignatureText}
+              />
+            )}
+            {modal === "signature" && (
+              <button
+                className="wide-button"
+                disabled={!page}
+                onClick={() => {
+                  setTool("extract_signature");
+                  setModal("");
+                  setMessage(
+                    "Drag a rectangle around the signature already in your document.",
+                  );
+                }}
+              >
+                Extract existing signature as PNG
+              </button>
             )}
             {modal === "image" && (
               <>
@@ -1931,7 +2229,9 @@ function App() {
                       source_id: importDoc.id,
                       page_id: page?.id,
                       page_ids: importIds,
-                    }).then(() => setModal(""));
+                    }).then((next) => {
+                      if (next) setModal("");
+                    });
                   }}
                 >
                   Merge selected pages
@@ -1978,8 +2278,10 @@ function App() {
                   className="primary wide-button"
                   disabled={!text || busy}
                   onClick={() => {
-                    void mutate({ kind: "watermark", ...style }).then(() =>
-                      setModal(""),
+                    void mutate({ kind: "watermark", ...style }).then(
+                      (next) => {
+                        if (next) setModal("");
+                      },
                     );
                   }}
                 >
@@ -2003,7 +2305,9 @@ function App() {
                         string,
                         string
                       >,
-                    }).then(() => setModal(""));
+                    }).then((next) => {
+                      if (next) setModal("");
+                    });
                   }}
                 >
                   {["title", "author", "subject", "keywords"].map((k) => (
@@ -2039,6 +2343,9 @@ function App() {
                       void run(async () => {
                         await api(`/documents/${doc.id}`, { method: "DELETE" });
                         setDoc(null);
+                        try {
+                          localStorage.removeItem("studio-last-document");
+                        } catch {}
                         setModal("");
                       })
                     }

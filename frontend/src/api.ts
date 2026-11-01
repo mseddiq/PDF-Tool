@@ -50,12 +50,13 @@ type Target = { page_id: string; rect: Rect };
 export type Operation = Style &
   (
     | ({ kind: "replace_text"; original: string; source_rect?: Rect } & Target)
-    | ({ kind: "text" } & Target)
+    | ({ kind: "text"; angle?: number } & Target)
     | ({
         kind: "image";
         asset_id: string;
         angle?: number;
         behind?: boolean;
+        signature?: boolean;
       } & Target)
     | {
         kind: "replace_image" | "delete_image";

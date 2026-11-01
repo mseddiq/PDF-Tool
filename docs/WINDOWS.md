@@ -14,11 +14,15 @@ Installation needs Internet. Normal PDF editing works offline afterward. Word co
 
 - **Setup stops at `python.exe: File "<string>", line 1`:** this was a quoting bug in the first Windows setup helper. Download the latest ZIP, extract it into a new folder, and run its Setup-Windows.cmd. The corrected checks use `--version` for both Python and Node and skip broken candidates without aborting setup.
 - **winget missing:** install Microsoft's **App Installer** through Microsoft Store, then rerun Setup-Windows.cmd. Alternatively, install Python 3.12 and Node.js LTS from their official sites first. If optional Office/OCR installation is unavailable, answer `n` to skip it and add those tools later.
-- **Arabic OCR unavailable:** install the Arabic `ara.traineddata` language data matching Tesseract and place it in its `tessdata` directory. The OCR dialog lists detected languages; do not assume Arabic is included by the Windows installer.
+- **English/Arabic OCR unavailable:** double-click `Install-OCR-Languages.cmd` in the extracted app folder. It installs official checksum-verified language data in `%LOCALAPPDATA%\PDFStudioPro\tessdata`, without requiring administrator access. Return to OCR and click **Refresh OCR status**. The OCR tool itself still requires Tesseract.
 - **Windows shows a warning:** these source scripts are not digitally signed. Inspect them or ask for help if you are unsure; do not disable Windows security globally.
 - **Setup failed:** keep the window open and copy the final error message. Run setup again after fixing the stated prerequisite.
-- **Port already used:** close the previous PDF Studio console window before starting another copy.
+- **Port already used:** the launcher reopens a recognized running PDF Studio instance. If an older version or another service is using port 8000, close its console window first.
 - **Moved/deleted project folder:** the desktop shortcut points at the extracted folder. Keep it in place, or rerun setup to recreate the shortcut after moving it.
 - **Updating from GitHub:** keep a backup of local documents; extract a new copy and run setup in that copy. The new copy's shortcut replaces the old shortcut. Never paste a Linux/cloud `.venv` into Windows.
 
 The scripts target Windows PowerShell 5.1 and Windows 10/11. They were reviewed in Linux but have not been executed on a Windows PC here. The first Windows run is still required to verify installer availability, language packs and machine-specific settings.
+
+## Extract your existing signature as PNG
+
+Open the PDF, choose **Extract signature PNG**, and drag a tight rectangle around your signature. Choose a resolution and download. Enable **Make near-white paper transparent** only if wanted; it can remove faint light marks. This works with signatures that are part of scanned pages or PDF drawings, as well as images. If the signature is a separate embedded image, click it with **Select & edit** and choose **Export selected image as PNG** to retain original pixel dimensions. These exports do not change the PDF.

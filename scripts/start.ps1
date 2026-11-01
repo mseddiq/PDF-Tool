@@ -8,7 +8,16 @@ if (-not (Test-Path frontend\dist\index.html)) { throw 'App build is missing. Do
 $url = 'http://127.0.0.1:8000'
 # Refuse to open an unrelated service already occupying the app port.
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 8000)
-try { $listener.Start() } catch { throw 'Port 8000 is already in use. Close the previous PDF Studio window before starting again.' } finally { $listener.Stop() }
+try { $listener.Start() } catch {
+    $existing = $null
+    try { $existing = Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 2 -Proxy $null } catch { }
+    if ($existing -and $existing.app -eq 'PDF Studio Pro') {
+        Start-Process $url
+        Write-Host 'Opened the PDF Studio Pro instance already running on this PC.'
+        exit 0
+    }
+    throw 'Port 8000 is already in use. Close the previous app console window before starting this version.'
+} finally { $listener.Stop() }
 $python = Join-Path (Get-Location).Path '.venv\Scripts\python.exe'
 $process = Start-Process -FilePath $python -ArgumentList @('-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000') -NoNewWindow -PassThru
 try {
@@ -17,7 +26,7 @@ try {
         if ($process.HasExited) { throw 'PDF Studio stopped before startup. Read the error above, or rerun setup.' }
         try {
             $health = Invoke-RestMethod -Uri "$url/api/health" -TimeoutSec 2 -Proxy $null
-            if ($health.status -eq 'ok') { $ready = $true; break }
+            if ($health.status -eq 'ok' -and $health.app -eq 'PDF Studio Pro') { $ready = $true; break }
         } catch { }
         Start-Sleep -Milliseconds 500
     }

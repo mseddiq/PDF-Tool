@@ -1,16 +1,26 @@
-# Current validation evidence
+# Validation evidence — 0.2.0 review
 
-Validated on Linux in the managed cloud environment on 2026-11-01:
+Executed in the Linux managed cloud environment on 2026-11-01:
 
-- Python 3.12.14; Node.js 24.19.0.
-- `pytest tests -q`: **17 passed**, one upstream Starlette/AnyIO deprecation warning.
-- `npm run test:e2e`: **2 passed** using installed Chromium.
-- `npm run build`: TypeScript and Vite production build passed.
-- `bash scripts/install.sh`: repeated successfully using Python and npm lockfiles.
-- `bash scripts/cloud-system.sh`: repeated successfully; signed Debian packages, local prefix, LibreOffice 25.2.3.2; OCR packs ara, eng and osd detected.
-- `bash scripts/start.sh`: started the application; health response reported status ok, LibreOffice true, OCR ara/eng/osd, 200 MB upload limit and 2,000-page limit.
-- `git diff --check`: passed. Generated dependencies, working PDFs and build output are ignored. Source changes were not committed or pushed.
+| Check                        | Observed outcome                                                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Backend suite                | **48 passed**, no failures/skips; one upstream Starlette/AnyIO deprecation warning                                                |
+| Full Chromium suite          | **32 passed** in one final run; uncaught page errors fail tests                                                                   |
+| Keyboard organizer stability | **5 additional repeated runs passed** after waiting for the sensor's initialization frame                                         |
+| Production build             | TypeScript and Vite build passed                                                                                                  |
+| Python static checks         | Ruff E9/F63/F7/F82 checks passed                                                                                                  |
+| Windows scripts              | All PowerShell scripts parsed successfully with PowerShell 7.5.4                                                                  |
+| Windows prerequisite helper  | Real Python/Node, failed executable, missing path, old Node and paths with spaces passed with legacy argument handling            |
+| OCR language installer       | Actual official eng/ara download and SHA-256 checks passed in an isolated directory with spaces; repeat run verified/reused files |
+| Runtime health               | App/version PDF Studio Pro 0.2.0; LibreOffice available; eng/ara OCR available; no OCR configuration error                        |
+| Repository whitespace        | git diff --check passed                                                                                                           |
 
-The backend suite reopened actual exports, checked native text removal, compared unchanged pixels, exercised Arabic replacement and supported font families, and ran real Word conversion and English OCR. See TESTING.md for coverage and FEATURES.md for unvalidated cases. Browser screenshots use synthetic content.
+The backend run used Python 3.12.14, local LibreOffice 25.2.3.2 and Tesseract with English/Arabic data. The browser used the installed Chromium against a fresh server on loopback port 8001 with the production frontend. The documented start script was also used to run version 0.2.0 on port 8000.
 
-Cloud configuration `install_script` and `start_skill` were saved as a draft. Saving does not publish or verify restoration in a new task. Windows execution and production certification are outstanding.
+Artifacts were reopened with PyMuPDF, Pillow, zipfile and python-docx. Verified outcomes include actual removed/replacement text, visible signatures in exported PDFs, PNG signature crops from scans/vector drawings/ink annotations, original embedded image resolution and alpha, preserved source pixels after OCR, real bilingual OCR text, actual Word conversions, page ordering, every shipped annotation type, password handling and failure recovery. TESTING.md gives commands and coverage. REVIEW.md explains the fixes.
+
+## Limits of these results
+
+These are representative generated fixtures, not a complete corpus of customer documents. They do not certify arbitrary font matching, paragraph reflow, perfect Word reconstruction, forensic redaction, cryptographic signatures or hostile-document sandboxing. The 100-page checks are functional/lazy-rendering checks, not a full native-memory or disk-exhaustion benchmark.
+
+PowerShell tests on Linux do not establish end-to-end Windows 11 Pro installer success. The GitHub Actions workflow configures Windows and Linux application tests with real external tools; its remote status must be checked separately. Interactive winget/UAC behavior, local antivirus and machine policies still need validation on the target PC. Do not describe those as passed based solely on this report.
