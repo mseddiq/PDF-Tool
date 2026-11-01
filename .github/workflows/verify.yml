@@ -44,7 +44,10 @@ jobs:
       - name: Create Python environment (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: python -m venv .venv
+        run: |
+          $python = Join-Path $env:pythonLocation 'python.exe'
+          & $python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the Python 3.12 test environment' }
       - name: Install Python dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -8,8 +8,12 @@ function Refresh-CommandPath {
 }
 function Find-Python {
     $candidates = @("$env:LOCALAPPDATA\Programs\Python\Python312\python.exe", "$env:ProgramFiles\Python312\python.exe")
-    $command = Get-Command python.exe -ErrorAction SilentlyContinue
-    if ($command -and $command.Source -notmatch 'WindowsApps') { $candidates += $command.Source }
+    $commands = Get-Command python.exe -All -ErrorAction SilentlyContinue
+    foreach ($command in $commands) {
+        # Office suites can put a bundled Python before the real development
+        # interpreter. Its version may match, but it cannot create our venv.
+        if ($command.Source -notmatch 'WindowsApps|LibreOffice[\\/]program[\\/]') { $candidates += $command.Source }
+    }
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate) {
             if (Test-StudioPython $candidate) { return $candidate }
