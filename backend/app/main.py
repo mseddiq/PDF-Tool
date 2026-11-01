@@ -320,7 +320,7 @@ def objects(doc_id: str, pid: str):
                 "spans": spans,
                 "images": images,
                 "scanned": any(i["background"] for i in images)
-                or not any(s["source"] == "native" for s in spans),
+                or (bool(images) and not any(s["source"] == "native" for s in spans)),
                 "has_ocr": any(s["source"] == "ocr" for s in spans),
                 "warning": "OCR text is a recognition aid, not the visible scan. Review it before replacing an image region.",
             }

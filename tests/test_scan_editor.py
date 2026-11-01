@@ -392,3 +392,10 @@ def test_background_server_can_quit_without_a_console(tmp_path):
             if proc.poll() is None:
                 proc.terminate()
                 proc.wait(timeout=5)
+
+
+def test_empty_page_does_not_claim_to_be_a_scan(client):
+    with fitz.open() as source:
+        source.new_page()
+        d = upload(client, source.tobytes())
+    assert not objects(client, d)["scanned"]
