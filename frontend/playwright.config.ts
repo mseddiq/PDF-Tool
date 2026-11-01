@@ -6,10 +6,12 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${process.env.STUDIO_TEST_PORT || "8000"}`,
     browserName: "chromium",
+    channel:
+      process.env.STUDIO_TEST_BROWSER === "chrome" ? "chrome" : undefined,
     launchOptions: {
       executablePath:
         process.env.CHROMIUM_PATH ||
-        (process.env.STUDIO_TEST_BROWSER === "bundled"
+        (Boolean(process.env.STUDIO_TEST_BROWSER)
           ? undefined
           : process.platform === "linux"
             ? "/usr/bin/chromium"

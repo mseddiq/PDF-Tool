@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -41,14 +41,33 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -r backend/requirements.lock
-      - name: Prepare Python environment (Windows)
+      - name: Create Python environment (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python -m venv .venv
+      - name: Install Python dependencies (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          python -m venv .venv
-          & ./.venv/Scripts/python.exe -m pip install -r backend/requirements.lock
-          if ($LASTEXITCODE -ne 0) { throw 'Python installation failed' }
-          & ./tests/windows-prerequisites.ps1 -PythonPath (Resolve-Path ./.venv/Scripts/python.exe).Path -NodePath (Get-Command node.exe).Source
+          $ErrorActionPreference = 'Continue'
+          & ./.venv/Scripts/python.exe -m pip install -r backend/requirements.lock 2>&1 | Tee-Object -Variable output
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $message = (($output | Select-Object -Last 12 | ForEach-Object { $_.ToString() }) -join "`n").Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Output "::error title=Windows Python dependency installation::$message"
+            exit $code
+          }
+      - name: Windows prerequisite regression checks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            & ./tests/windows-prerequisites.ps1 -PythonPath (Resolve-Path ./.venv/Scripts/python.exe).Path -NodePath (Get-Command node.exe).Source
+          } catch {
+            $message = $_.Exception.Message.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Output "::error title=Windows prerequisite regression::$message"
+            exit 1
+          }
       - name: Backend feature tests (Linux)
         if: runner.os == 'Linux'
         run: .venv/bin/python -m pytest tests -q
@@ -58,19 +77,17 @@ jobs:
         run: |
           & ./.venv/Scripts/python.exe -m pytest tests -q
           if ($LASTEXITCODE -ne 0) { throw 'Backend checks failed' }
-      - name: Frontend install and production build
+      - name: Frontend dependency installation
         working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-      - name: Install Chromium for browser checks
+        run: npm ci
+      - name: Frontend production build
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        run: npm run build
       - name: Browser feature checks
         working-directory: frontend
         env:
           CI: "true"
-          STUDIO_TEST_BROWSER: bundled
+          STUDIO_TEST_BROWSER: chrome
         run: npm run test:e2e
       - name: Retain synthetic test artifacts
         if: always()
