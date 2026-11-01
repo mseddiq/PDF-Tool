@@ -325,6 +325,7 @@ def test_text_height_overflow_and_missing_image_are_atomic(client):
             "original": span["text"],
             "text": "A",
             "font_size": 100,
+            "fit_text": False,
         },
         422,
     )

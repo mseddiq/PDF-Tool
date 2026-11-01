@@ -1,4 +1,5 @@
 import io
+import os
 import shutil
 import subprocess
 import tempfile
@@ -7,7 +8,7 @@ from threading import Event
 import pymupdf as fitz
 from docx import Document
 from docx.shared import Pt
-from PIL import Image
+from PIL import Image, ImageOps
 import pytesseract
 from ..core import TIMEOUT, MAX_PIXELS
 from .runtime import configure_ocr, office_binary
@@ -43,7 +44,10 @@ def word_to_pdf(source, destination, cancel):
         import time
 
         with subprocess.Popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ) as proc:
             deadline = time.monotonic() + TIMEOUT
             while proc.poll() is None:
@@ -162,7 +166,8 @@ def ocr_pdf(source, destination, language, cancel, progress):
                     rendered = fitz.Rect(page.rect)
                     inverse = fitz.Matrix(page.derotation_matrix)
                     scale = min(
-                        2.5, (MAX_PIXELS / (rendered.width * rendered.height)) ** 0.5
+                        300 / 72,
+                        (MAX_PIXELS / (rendered.width * rendered.height)) ** 0.5,
                     )
                     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
                 finally:
@@ -222,9 +227,11 @@ def ocr_pdf(source, destination, language, cancel, progress):
                     for existing in native_rects
                 ):
                     continue
-                size = min(
-                    display.height / (font.ascender - font.descender),
-                    display.width / max(font.text_length(text, fontsize=1), 0.01),
+                # Stretch the invisible glyph advance to the detected word box.
+                # A uniform fit made dates selectable only over their left half.
+                size = display.height / (font.ascender - font.descender)
+                stretch = display.width / max(
+                    font.text_length(text, fontsize=size), 0.01
                 )
                 if size <= 0:
                     continue
@@ -239,6 +246,12 @@ def ocr_pdf(source, destination, language, cancel, progress):
                     fontsize=size,
                     rotate=ocr_rotation,
                     render_mode=3,
+                    morph=(
+                        baseline,
+                        fitz.Matrix(1, stretch)
+                        if ocr_rotation % 180
+                        else fitz.Matrix(stretch, 1),
+                    ),
                     overlay=True,
                 )
                 words.append(text)
@@ -256,3 +269,57 @@ def ocr_pdf(source, destination, language, cancel, progress):
             progress((n + 1) / len(result))
         result.save(destination, garbage=4, deflate=True)
     return review
+
+
+def recognize_region(source, page_index, rect, language, dpi, mode, cancel):
+    configure_ocr(language)
+    checkpoint(cancel)
+    with fitz.open(source) as pdf:
+        if not 0 <= page_index < len(pdf):
+            raise ValueError("Selected page is no longer available.")
+        page = pdf[page_index]
+        region = fitz.Rect(rect)
+        if (
+            region.is_empty
+            or region.is_infinite
+            or not (page.rect * page.derotation_matrix).contains(region)
+        ):
+            raise ValueError("Select a valid text region inside the page.")
+        clip = region * page.rotation_matrix
+        scale = dpi / 72
+        if (clip.width * scale + 2) * (clip.height * scale + 2) > MAX_PIXELS:
+            raise ValueError(
+                "Selected region is too large at this resolution. Reduce DPI or select a smaller field."
+            )
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip, alpha=False)
+        image = ImageOps.autocontrast(
+            ImageOps.grayscale(Image.open(io.BytesIO(pix.tobytes("png"))))
+        )
+    config = "--psm 7" if mode in ("line", "numbers") else "--psm 6"
+    if mode == "numbers":
+        config += " -c tessedit_char_whitelist=0123456789/.-"
+    data = pytesseract.image_to_data(
+        image,
+        lang=language,
+        config=config,
+        output_type=pytesseract.Output.DICT,
+        timeout=TIMEOUT,
+    )
+    checkpoint(cancel)
+    lines = {}
+    scores = []
+    for i, text in enumerate(data["text"]):
+        if not text.strip() or float(data["conf"][i]) < 0:
+            continue
+        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+        lines.setdefault(key, []).append(text.strip())
+        scores.append(float(data["conf"][i]))
+    text = "\n".join(" ".join(words) for words in lines.values())
+    return {
+        "text": text,
+        "confidence": round(sum(scores) / len(scores), 1) if scores else 0,
+        "rect": list(region),
+        "page_index": page_index,
+        "dpi": dpi,
+        "warning": "OCR is a suggestion. Check the original image and correct the text before applying.",
+    }

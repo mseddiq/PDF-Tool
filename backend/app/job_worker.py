@@ -5,10 +5,11 @@ import sys
 import time
 from pathlib import Path
 from threading import Event
-from .services.conversion import pdf_to_word, word_to_pdf, ocr_pdf
+from .services.conversion import pdf_to_word, word_to_pdf, ocr_pdf, recognize_region
 
 if __name__ == "__main__":
-    source, output, status, kind, language, mode = sys.argv[1:]
+    source, output, status, kind, language, mode, *arguments = sys.argv[1:]
+    options = json.loads(arguments[0]) if arguments else {}
     status = Path(status)
 
     def report(**value):
@@ -33,6 +34,17 @@ if __name__ == "__main__":
             word_to_pdf(Path(source), Path(output), cancel)
         elif kind == "docx":
             extra["warnings"] = pdf_to_word(source, output, mode, cancel, progress)
+        elif kind == "ocr_region":
+            extra["region"] = recognize_region(
+                source,
+                options["page_index"],
+                options["rect"],
+                language,
+                options.get("dpi", 300),
+                options.get("recognition_mode", "auto"),
+                cancel,
+            )
+            Path(output).write_text(json.dumps(extra["region"]), encoding="utf-8")
         else:
             extra["review"] = ocr_pdf(source, output, language, cancel, progress)
         report(progress=1, status="done", **extra)

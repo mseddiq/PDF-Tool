@@ -28,17 +28,28 @@ export type Span = {
   size: number;
   color: string;
   flags: number;
+  source?: "native" | "ocr" | "hidden";
+  angle?: number;
 };
 export type Objects = {
   spans: Span[];
-  images: { xref: number; rect: Rect; width: number; height: number }[];
+  images: {
+    xref: number;
+    rect: Rect;
+    width: number;
+    height: number;
+    background?: boolean;
+  }[];
   scanned: boolean;
+  has_ocr?: boolean;
   warning: string;
 };
 type Style = {
   font?: "helv" | "tiro" | "cour";
   text?: string;
   font_size?: number;
+  fit_text?: boolean;
+  background_color?: string;
   color?: string;
   bold?: boolean;
   italic?: boolean;
@@ -49,7 +60,13 @@ type Style = {
 type Target = { page_id: string; rect: Rect };
 export type Operation = Style &
   (
-    | ({ kind: "replace_text"; original: string; source_rect?: Rect } & Target)
+    | ({
+        kind: "replace_text";
+        original: string;
+        source_rect?: Rect;
+        angle?: number;
+      } & Target)
+    | ({ kind: "replace_scan"; source_rect: Rect; angle?: number } & Target)
     | ({ kind: "text"; angle?: number } & Target)
     | ({
         kind: "image";

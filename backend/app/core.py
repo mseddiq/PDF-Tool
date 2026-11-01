@@ -78,7 +78,57 @@ def page_ids(state):
     return state["history"][state["cursor"]]["pages"]
 
 
+def ensure_baseline(doc_id, state):
+    if state.get("baseline") and (folder(doc_id) / state["baseline"]["file"]).is_file():
+        return state
+    initial = next((h for h in state["history"] if h["file"] == "initial.pdf"), None)
+    path = folder(doc_id)
+    if initial and (path / "initial.pdf").is_file():
+        shutil.copyfile(path / "initial.pdf", path / "baseline.pdf")
+        baseline = {"file": "baseline.pdf", "pages": initial["pages"].copy()}
+    else:
+        original = path / "original.pdf"
+        if not original.is_file():
+            raise HTTPException(
+                409,
+                "The original working copy is unavailable. Reopen the source file to discard changes.",
+            )
+        with fitz.open(original) as source:
+            if source.needs_pass:
+                raise HTTPException(
+                    409,
+                    "Reopen the password-protected source once in this version to enable Discard all changes.",
+                )
+            source.save(path / "baseline.pdf", garbage=4, deflate=True)
+            baseline = {
+                "file": "baseline.pdf",
+                "pages": [uuid.uuid4().hex for _ in source],
+            }
+    state = {**state, "baseline": baseline}
+    store(doc_id, state)
+    return state
+
+
+def discard_changes(doc_id, state):
+    state = ensure_baseline(doc_id, state)
+    baseline = state["baseline"]
+    next_state = {
+        **state,
+        "history": [{"file": baseline["file"], "pages": baseline["pages"].copy()}],
+        "cursor": 0,
+        "revision": state["revision"] + 1,
+    }
+    store(doc_id, next_state)
+    for entry in state["history"]:
+        if entry["file"] != baseline["file"]:
+            (folder(doc_id) / entry["file"]).unlink(missing_ok=True)
+    for asset in folder(doc_id).glob("asset-*.png"):
+        asset.unlink(missing_ok=True)
+    return next_state
+
+
 def commit(doc_id, doc, ids, state):
+    state = ensure_baseline(doc_id, state)
     if not 0 < len(ids) <= MAX_PAGES:
         raise HTTPException(422, f"A document must have 1–{MAX_PAGES} pages.")
     name = uuid.uuid4().hex + ".pdf"
@@ -101,7 +151,7 @@ def commit(doc_id, doc, ids, state):
     store(doc_id, next_state)
     retained = {h["file"] for h in history}
     for h in old_history:
-        if h["file"] not in retained:
+        if h["file"] not in retained and h["file"] != state["baseline"]["file"]:
             (folder(doc_id) / h["file"]).unlink(missing_ok=True)
     return next_state
 

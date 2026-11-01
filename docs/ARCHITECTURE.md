@@ -25,3 +25,9 @@ Operations are discriminated JSON contracts, validated by Pydantic and dispatche
 ## Review update (0.2.0)
 
 OCR reads temporary page renders with Tesseract TSV, then inserts invisible words into a copy of the original PDF. It filters existing native words and preserves original pixels and annotations. Model discovery and executable diagnosis live in services/runtime.py. Windows models are downloaded explicitly by the installer from a pinned official revision with SHA-256 verification. Signature PNG export is a read-only operation: services/extraction.py either exports the original embedded resource with its soft mask or renders a selected region in rotation-correct coordinates. White removal is opt-in and uses bounded Pillow channel operations. Image ZIP exports use temporary files with response cleanup. The React signature dialog is a separate component; signature placement forces a visible foreground layer.
+
+## Scan and desktop update (0.3.0)
+
+services/content.py labels invisible OCR spans separately from native content. Scanned-field replacement erases selected image samples and associated OCR text, then inserts fitted fallback text. services/scan_editor.py preserves compatible color spaces and hard/soft masks; unsupported images use MuPDF pixel redaction. Regional OCR jobs are read-only suggestions tied to document revision/page IDs, never automatic mutations. OCR word advances stretch to their detected boxes.
+
+A persistent baseline PDF and its page IDs survive history pruning and support a reset that clears undo/redo and draft assets. scripts/desktop.py launches a no-console child through pythonw on Windows, logs locally, waits for health, and reuses a matching running version. backend/app/desktop_server.py serves loopback and stops through an event set by the desktop-only shutdown endpoint. Normal development servers retain terminal control.

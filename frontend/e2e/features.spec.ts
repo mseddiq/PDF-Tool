@@ -602,3 +602,161 @@ test("replace an image through the UI and export the applied replacement", async
   );
   expect(pixel).toEqual([255, 0, 0]);
 });
+
+const scannedField = () =>
+  generate(
+    "from PIL import Image,ImageDraw,ImageFont;import io,pymupdf as f,sys;i=Image.new('RGB',(1224,1584),'white');draw=ImageDraw.Draw(i);draw.text((800,350),'2026/07/15',font=ImageFont.truetype('backend/app/fonts/DejaVuSans.ttf',36),fill='black');draw.line([(120,1000),(160,1040),(200,1000)],fill='blue',width=5);b=io.BytesIO();i.save(b,format='PNG');d=f.open();p=d.new_page(width=612,height=792);p.insert_image(p.rect,stream=b.getvalue());sys.stdout.buffer.write(d.tobytes())",
+  );
+
+test("edit a scanned date without OCR, resize, and persist real pixel replacement", async ({
+  page,
+}) => {
+  await open(page, scannedField());
+  await expect(
+    page.getByRole("button", {
+      name: "Select a scanned field to edit",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByTitle("Edit scanned field", { exact: true }).click();
+  await drag(page, [395, 170], [525, 205]);
+  await expect(
+    page.getByAltText("Original scanned field for comparison"),
+  ).toBeVisible();
+  await page.getByLabel("Text content").fill("2026/08/01");
+  await expect(
+    page.getByLabel("Fit text to box", { exact: true }),
+  ).toBeChecked();
+  const frame = page.getByRole("group", {
+      name: "Selected object; drag to reposition",
+    }),
+    before = await frame.boundingBox();
+  const handle = page.getByRole("button", {
+      name: "Resize bottom right",
+      exact: true,
+    }),
+    box = await handle.boundingBox();
+  if (!box || !before) throw new Error("Missing resize handle");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    box.x + box.width / 2 + 35,
+    box.y + box.height / 2 + 25,
+    { steps: 8 },
+  );
+  await page.mouse.up();
+  expect((await frame.boundingBox())!.height).toBeGreaterThan(
+    before.height + 15,
+  );
+  await page
+    .getByRole("button", { name: "Apply scan replacement", exact: true })
+    .click();
+  await revision(page, 1);
+  const out = inspect(await exportPdf(page));
+  expect(out.text[0]).toContain("2026/08/01");
+  expect(out.text[0]).not.toContain("2026/07/15");
+});
+
+test("recognize a selected date, review it, correct it, then apply", async ({
+  page,
+}) => {
+  await open(page, scannedField());
+  await expect(
+    page.getByRole("button", {
+      name: "Select a scanned field to edit",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByTitle("Edit scanned field", { exact: true }).click();
+  await drag(page, [395, 170], [525, 205]);
+  await page.getByLabel("Field recognition").selectOption("numbers");
+  await page.getByLabel("OCR resolution").selectOption("400");
+  await page
+    .getByRole("button", { name: "Recognize selected field", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("done", {
+    timeout: 30000,
+  });
+  await page
+    .getByRole("button", { name: "Use recognized text", exact: true })
+    .click();
+  await expect(page.getByLabel("Text content")).toHaveValue("2026/07/15");
+  await page.getByLabel("Text content").fill("2026/08/01");
+  await page.getByRole("button", { name: "Apply scan replacement" }).click();
+  await revision(page, 1);
+  expect(inspect(await exportPdf(page)).text[0]).toContain("2026/08/01");
+});
+
+test("discard all changes restores the original pages and clears undo history", async ({
+  page,
+}) => {
+  await open(page);
+  await page
+    .getByLabel("Edit text Review original text", { exact: true })
+    .click();
+  await page.getByLabel("Text content").fill("Changed field");
+  await page.getByRole("button", { name: "Apply text replacement" }).click();
+  await revision(page, 1);
+  await page.getByTitle("Insert blank page").click();
+  await revision(page, 2);
+  await page.getByTitle("Discard all changes", { exact: true }).click();
+  await page
+    .getByRole("button", { name: "Discard all changes and restore original" })
+    .click();
+  await revision(page, 3);
+  await expect(page.getByTitle("Undo (Ctrl+Z)")).toBeDisabled();
+  await expect(page.getByTitle("Redo (Ctrl+Y)")).toBeDisabled();
+  const out = inspect(await exportPdf(page));
+  expect(out.pages).toBe(2);
+  expect(out.text[0]).toContain("Review original text");
+  expect(out.text[0]).not.toContain("Changed field");
+});
+
+for (const rotation of [0, 90, 180, 270])
+  test(`drag and keyboard resize on a ${rotation}-degree page`, async ({
+    page,
+  }) => {
+    const pdf = generate(
+      `import pymupdf as f,sys;d=f.open();p=d.new_page();p.insert_text((200,300),'Editable text',fontsize=16);p.set_rotation(${rotation});sys.stdout.buffer.write(d.tobytes())`,
+    );
+    await open(page, pdf);
+    await page.getByLabel("Edit text Editable text", { exact: true }).click();
+    const frame = page.getByRole("group", {
+        name: "Selected object; drag to reposition",
+      }),
+      initial = await frame.boundingBox();
+    const handle = page.getByRole("button", {
+      name: "Resize bottom right",
+      exact: true,
+    });
+    await handle.focus();
+    await page.keyboard.press("Shift+ArrowRight");
+    await page.keyboard.press("Shift+ArrowDown");
+    const resized = await frame.boundingBox();
+    expect(resized!.width).toBeGreaterThan(initial!.width + 7);
+    expect(resized!.height).toBeGreaterThan(initial!.height + 7);
+    await page.getByRole("button", { name: "Apply text replacement" }).click();
+    await revision(page, 1);
+    expect(inspect(await exportPdf(page)).text[0]).toContain("Editable text");
+  });
+
+test("desktop Quit UI stops the app and shows a closed state", async ({
+  page,
+}) => {
+  await page.route("**/api/health", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      json: { ...(await response.json()), desktop_mode: true },
+    });
+  });
+  await page.route("**/api/shutdown", (route) =>
+    route.fulfill({ json: { stopping: true } }),
+  );
+  await open(page);
+  await page.getByTitle("Settings", { exact: true }).click();
+  await page.getByRole("button", { name: "Quit app", exact: true }).click();
+  await page.getByRole("button", { name: "Quit app now", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "PDF Studio Pro has closed" }),
+  ).toBeVisible();
+});

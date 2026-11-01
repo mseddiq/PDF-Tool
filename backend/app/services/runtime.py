@@ -72,7 +72,12 @@ def ocr_status():
         command += ["--tessdata-dir", str(data)]
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, timeout=10, check=False
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         if result.returncode:
             raise ValueError()

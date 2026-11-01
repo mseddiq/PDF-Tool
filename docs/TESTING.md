@@ -43,6 +43,8 @@ CI=true STUDIO_TEST_PORT=8001 CHROMIUM_PATH=/usr/bin/chromium npm run test:e2e
 
 Browser checks cover actual upload/edit/export/undo/redo, existing-signature region and resource PNG downloads, four signature input paths, new text and unapplied-draft protection, image placement/movement/replacement/deletion and ZIP export, every annotation tool, keyboard page sorting, merge preview and subset export, Word conversions, bilingual OCR and opening results, missing-tool preflight, utilities/search/printing, password prompts, failed-operation dialogs, working-copy restore, Arabic text, theme, mobile inspector, zoom/fit/crop and 100-page thumbnail loading. Uncaught browser JavaScript errors fail the suite. Test artifacts are written under frontend/test-results, not tracked documentation.
 
+The 0.3.0 scan suite additionally checks native/OCR provenance, real raster-pixel removal, soft and hard masks, retained color spaces, automatic fitting, regional numeric OCR, correct OCR word widths, baseline restoration after history pruning, encrypted input, legacy migration, and the background desktop service lifecycle. Windows asserts that this service has no attached console. Browser cases cover scan replacement, region OCR review/correction, Discard, eight resize handles and keyboard resizing on all four page rotations, and the Quit interface.
+
 ## Windows helpers
 
 ```powershell

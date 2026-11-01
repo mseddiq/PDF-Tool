@@ -60,9 +60,11 @@ import {
 import Thumbnails from "./Thumbnails";
 import SelectionFrame from "./SelectionFrame";
 import SignatureDialog from "./SignatureDialog";
+import ScanPreview from "./ScanPreview";
 import "./styles.css";
 
 type Tool =
+  | "scan_text"
   | "select"
   | "text"
   | "image"
@@ -86,6 +88,10 @@ type Job = {
   progress: number;
   error?: string;
   warnings?: string[];
+  doc_id?: string;
+  page_id?: string;
+  revision?: number;
+  region?: { text: string; confidence: number; rect: Rect; dpi: number };
   review?: { page: number; confidence: number; text: string }[];
 };
 const categories = [
@@ -122,7 +128,18 @@ function App() {
     [italic, setItalic] = useState(false),
     [underline, setUnderline] = useState(false),
     [align, setAlign] = useState<"left" | "center" | "right">("left"),
-    [opacity, setOpacity] = useState(1);
+    [opacity, setOpacity] = useState(1),
+    [fitText, setFitText] = useState(true),
+    [backgroundColor, setBackgroundColor] = useState("#ffffff"),
+    [scanField, setScanField] = useState<{
+      page_id: string;
+      source_rect: Rect;
+      moved?: boolean;
+    } | null>(null),
+    [scanDirty, setScanDirty] = useState(false),
+    [recognitionMode, setRecognitionMode] = useState("line"),
+    [ocrDpi, setOcrDpi] = useState(300),
+    [appStopped, setAppStopped] = useState(false);
   const [rect, setRect] = useState<Rect>([72, 72, 320, 130]),
     [asset, setAsset] = useState(""),
     [assetPending, setAssetPending] = useState(false),
@@ -137,6 +154,7 @@ function App() {
       libreoffice: boolean;
       ocr_languages: string[];
       max_mb: number;
+      desktop_mode?: boolean;
       ocr?: {
         available: boolean;
         data_directory: string | null;
@@ -171,6 +189,8 @@ function App() {
     );
     setSpan(null);
     setImageXref(null);
+    setScanField(null);
+    setScanDirty(false);
   }, []);
   const requestCount = useRef(0),
     mutationFlight = useRef(false);
@@ -334,6 +354,7 @@ function App() {
       if (
         assetPending ||
         textPending ||
+        scanDirty ||
         (span &&
           (text !== span.text ||
             rect.some((v, i) => Math.abs(v - span.rect[i]) > 0.1) ||
@@ -383,6 +404,7 @@ function App() {
       italic,
       underline,
       fontFamily,
+      scanDirty,
     ],
   );
   useEffect(() => {
@@ -394,6 +416,8 @@ function App() {
         setAssetPending(false);
         setTextPending(false);
         setImageXref(null);
+        setScanField(null);
+        setScanDirty(false);
         return;
       }
       if (
@@ -450,11 +474,15 @@ function App() {
     setOpacity(1);
     setText("");
     setJob(null);
+    setScanField(null);
+    setScanDirty(false);
   }, [doc?.id]);
   useEffect(() => {
     setSpan(null);
     setImageXref(null);
     setTextPending(false);
+    setScanField(null);
+    setScanDirty(false);
   }, [page?.id]);
   useEffect(() => {
     if (modal === "ocr")
@@ -473,9 +501,25 @@ function App() {
     underline,
     align,
     opacity,
+    fit_text: fitText,
+    background_color: backgroundColor,
   };
   function pickSpan(s: Span) {
     setSpan(s);
+    if (s.source === "ocr" && page) {
+      const b = page.bounds;
+      setScanField({
+        page_id: page.id,
+        source_rect: [
+          Math.max(b[0], s.rect[0] - 1),
+          Math.max(b[1], s.rect[1] - 1),
+          Math.min(b[2], s.rect[2] + 1),
+          Math.min(b[3], s.rect[3] + 1),
+        ],
+      });
+    } else setScanField(null);
+    setScanDirty(false);
+    setFitText(true);
     setRect(s.rect);
     setText(s.text);
     setFontSize(Math.round(s.size * 10) / 10);
@@ -568,6 +612,19 @@ function App() {
     setSpan(null);
     if (tool === "text") {
       setTextPending(true);
+      return;
+    }
+    if (tool === "scan_text") {
+      setScanField({ page_id: page.id, source_rect: r });
+      setScanDirty(false);
+      setText("");
+      setFitText(true);
+      setFontSize(Math.max(8, Math.min(24, (r[3] - r[1]) * 0.8)));
+      setColor("#172033");
+      setTool("select");
+      setMessage(
+        "Type the corrected field or recognize this area, then Apply scan replacement.",
+      );
       return;
     }
     if (tool === "image" || tool === "signature") {
@@ -731,6 +788,7 @@ function App() {
   }
   const tools: { id: Tool; label: string; icon: React.ReactNode }[] = [
     { id: "select", label: "Select & edit", icon: <MousePointer2 /> },
+    { id: "scan_text", label: "Edit scanned field", icon: <ScanText /> },
     { id: "text", label: "Add text", icon: <Type /> },
     { id: "image", label: "Add image", icon: <ImageIcon /> },
     { id: "highlight", label: "Highlight", icon: <Highlighter /> },
@@ -743,6 +801,16 @@ function App() {
     { id: "rect", label: "Shape", icon: <Square /> },
     { id: "note", label: "Comment", icon: <MessageSquare /> },
   ];
+  if (appStopped)
+    return (
+      <main className="app-closed">
+        <h1>PDF Studio Pro has closed</h1>
+        <p>
+          You can close this browser tab. Use the desktop shortcut to open the
+          app again.
+        </p>
+      </main>
+    );
   return (
     <div
       className="app"
@@ -882,6 +950,14 @@ function App() {
                 <span>Open</span>
               </button>
               <button
+                title="Discard all changes"
+                disabled={busy}
+                onClick={() => setModal("discard")}
+              >
+                <Trash2 />
+                <span>Discard</span>
+              </button>
+              <button
                 disabled={!doc.can_undo || busy}
                 onClick={() => history("undo")}
                 title="Undo (Ctrl+Z)"
@@ -906,6 +982,8 @@ function App() {
                     setTool(t.id);
                     setSpan(null);
                     setImageXref(null);
+                    setScanField(null);
+                    setScanDirty(false);
                     if (t.id === "image") assetInput.current?.click();
                     if (t.id === "signature") setModal("signature");
                   }}
@@ -1045,8 +1123,19 @@ function App() {
               ))}
               {objects?.scanned && (
                 <div className="document-warning">
-                  This page has no native text.{" "}
-                  <button onClick={() => setModal("ocr")}>Run local OCR</button>
+                  Scanned text is part of the image.{" "}
+                  <button
+                    onClick={() => {
+                      setTool("scan_text");
+                      setSpan(null);
+                      setScanField(null);
+                    }}
+                  >
+                    Select a scanned field to edit
+                  </button>{" "}
+                  or{" "}
+                  <button onClick={() => setModal("ocr")}>Run local OCR</button>{" "}
+                  for suggestions.
                 </div>
               )}
               <div className="page-scroll">
@@ -1087,23 +1176,27 @@ function App() {
                         />
                       ))}
                     {tool === "select" &&
-                      objects?.images.map((im, i) => (
-                        <button
-                          key={`image-${i}`}
-                          className="image-hit"
-                          style={displayRect(im.rect)}
-                          title="Select embedded image"
-                          aria-label={`Select image ${i + 1}`}
-                          onClick={() => {
-                            setImageXref(im.xref);
-                            setRect(im.rect);
-                            setImageAngle(0);
-                            setOpacity(1);
-                            setBehind(false);
-                            setSpan(null);
-                          }}
-                        />
-                      ))}
+                      objects?.images
+                        .filter((im) => !im.background)
+                        .map((im, i) => (
+                          <button
+                            key={`image-${i}`}
+                            className="image-hit"
+                            style={displayRect(im.rect)}
+                            title="Select embedded image"
+                            aria-label={`Select image ${i + 1}`}
+                            onClick={() => {
+                              setImageXref(im.xref);
+                              setRect(im.rect);
+                              setImageAngle(0);
+                              setOpacity(1);
+                              setBehind(false);
+                              setSpan(null);
+                              setScanField(null);
+                              setScanDirty(false);
+                            }}
+                          />
+                        ))}
                     {hits
                       .filter((h) => h.page_id === page.id)
                       .map((h, i) => (
@@ -1113,12 +1206,36 @@ function App() {
                           style={displayRect(h.rect)}
                         />
                       ))}
-                    {tool === "select" && (span || imageXref) && (
+                    {tool === "select" && (span || imageXref || scanField) && (
                       <SelectionFrame
                         rect={rect}
                         page={page}
                         style={displayRect(rect)}
-                        onChange={setRect}
+                        disabled={busy}
+                        onChange={(next, action) => {
+                          setRect(next);
+                          if (scanField) {
+                            setScanDirty(true);
+                            if (action === "resize" && !scanField.moved) {
+                              const a = scanField.source_rect;
+                              setScanField({
+                                ...scanField,
+                                source_rect: [
+                                  Math.min(a[0], next[0]),
+                                  Math.min(a[1], next[1]),
+                                  Math.max(a[2], next[2]),
+                                  Math.max(a[3], next[3]),
+                                ],
+                              });
+                            } else if (
+                              action === "move" &&
+                              Math.abs(next[0] - rect[0]) +
+                                Math.abs(next[1] - rect[1]) >
+                                0.1
+                            )
+                              setScanField({ ...scanField, moved: true });
+                          }
+                        }}
                         toDoc={toDoc}
                       />
                     )}
@@ -1180,17 +1297,108 @@ function App() {
               </div>
               <div className="property-section">
                 <div className="section-label">
-                  {span
-                    ? "EDIT EXISTING TEXT"
-                    : imageXref
-                      ? "EMBEDDED IMAGE"
-                      : "TEXT & APPEARANCE"}
+                  {scanField
+                    ? "EDIT SCANNED FIELD"
+                    : span
+                      ? "EDIT EXISTING TEXT"
+                      : imageXref
+                        ? "EMBEDDED IMAGE"
+                        : "TEXT & APPEARANCE"}
                 </div>
-                {span && (
+                {span && !scanField && (
                   <p className="hint">
                     Original: {span.font}. Replacement uses a fallback font.
                     Original text is removed from the export.
                   </p>
+                )}
+                {scanField && doc && page && (
+                  <>
+                    <p className="hint">
+                      This changes a scanned image field. The source pixels and
+                      OCR text are removed on apply; new text uses a fallback
+                      font. Review the preview before exporting.
+                    </p>
+                    <ScanPreview
+                      docId={doc.id}
+                      pageId={page.id}
+                      revision={doc.revision}
+                      rect={scanField.source_rect}
+                    />
+                    <label>
+                      Recognition language
+                      <select
+                        value={language}
+                        onChange={(e) => setLanguage(e.target.value)}
+                      >
+                        <option value="eng">English</option>
+                        <option value="ara">Arabic</option>
+                        <option value="eng+ara">English + Arabic</option>
+                      </select>
+                    </label>
+                    <label>
+                      Field recognition
+                      <select
+                        value={recognitionMode}
+                        onChange={(e) => setRecognitionMode(e.target.value)}
+                      >
+                        <option value="line">Single line</option>
+                        <option value="numbers">Numbers / dates</option>
+                        <option value="auto">Text block</option>
+                      </select>
+                    </label>
+                    <label>
+                      OCR resolution
+                      <select
+                        value={ocrDpi}
+                        onChange={(e) => setOcrDpi(+e.target.value)}
+                      >
+                        <option value={300}>300 DPI</option>
+                        <option value={400}>400 DPI</option>
+                        <option value={600}>600 DPI</option>
+                      </select>
+                    </label>
+                    <button
+                      className="wide-button"
+                      disabled={
+                        busy ||
+                        !health?.ocr?.available ||
+                        language
+                          .split("+")
+                          .some((code) => !health?.ocr_languages.includes(code))
+                      }
+                      onClick={() =>
+                        void run(async () => {
+                          setJob(
+                            await api(
+                              `/documents/${doc.id}/jobs`,
+                              json({
+                                kind: "ocr_region",
+                                language,
+                                page_id: page.id,
+                                rect: scanField.source_rect,
+                                dpi: ocrDpi,
+                                recognition_mode: recognitionMode,
+                              }),
+                            ),
+                          );
+                          setModal("jobs");
+                        })
+                      }
+                    >
+                      Recognize selected field
+                    </button>
+                    <button
+                      className="wide-button"
+                      onClick={() => {
+                        setTool("scan_text");
+                        setScanField(null);
+                        setSpan(null);
+                        setScanDirty(false);
+                      }}
+                    >
+                      Reselect source area
+                    </button>
+                  </>
                 )}
                 {imageXref ? (
                   <>
@@ -1295,19 +1503,51 @@ function App() {
                       Text content
                       <textarea
                         value={text}
-                        onChange={(e) => setText(e.target.value)}
+                        onChange={(e) => {
+                          setText(e.target.value);
+                          if (scanField) setScanDirty(true);
+                        }}
                         placeholder="Select text or draw a new text box…"
                         dir="auto"
                       />
                     </label>
+                    <label className="check-label">
+                      <input
+                        type="checkbox"
+                        checked={fitText}
+                        onChange={(e) => {
+                          setFitText(e.target.checked);
+                          if (scanField) setScanDirty(true);
+                        }}
+                      />
+                      Fit text to box
+                    </label>
+                    <p className="hint">
+                      Text shrinks if needed. Resize the box or raise the
+                      maximum size for larger text.
+                    </p>
+                    {scanField && (
+                      <label>
+                        Paper/background color
+                        <input
+                          type="color"
+                          value={backgroundColor}
+                          onChange={(e) => {
+                            setBackgroundColor(e.target.value);
+                            if (scanField) setScanDirty(true);
+                          }}
+                        />
+                      </label>
+                    )}
                     <label>
                       Font family
                       <select
                         aria-label="Font family"
                         value={fontFamily}
-                        onChange={(e) =>
-                          setFontFamily(e.target.value as typeof fontFamily)
-                        }
+                        onChange={(e) => {
+                          setFontFamily(e.target.value as typeof fontFamily);
+                          if (scanField) setScanDirty(true);
+                        }}
                       >
                         <option value="helv">Helvetica · Latin fallback</option>
                         <option value="tiro">Times · Latin fallback</option>
@@ -1322,7 +1562,10 @@ function App() {
                           min="4"
                           max="300"
                           value={fontSize}
-                          onChange={(e) => setFontSize(+e.target.value)}
+                          onChange={(e) => {
+                            setFontSize(+e.target.value);
+                            if (scanField) setScanDirty(true);
+                          }}
                         />
                       </label>
                       <label>
@@ -1332,7 +1575,10 @@ function App() {
                             aria-label="Text color"
                             type="color"
                             value={color}
-                            onChange={(e) => setColor(e.target.value)}
+                            onChange={(e) => {
+                              setColor(e.target.value);
+                              if (scanField) setScanDirty(true);
+                            }}
                           />
                           <span>{color.toUpperCase()}</span>
                         </div>
@@ -1341,21 +1587,30 @@ function App() {
                     <div className="format-controls">
                       <button
                         className={bold ? "pressed" : ""}
-                        onClick={() => setBold(!bold)}
+                        onClick={() => {
+                          setBold(!bold);
+                          if (scanField) setScanDirty(true);
+                        }}
                         title="Bold"
                       >
                         <b>B</b>
                       </button>
                       <button
                         className={italic ? "pressed" : ""}
-                        onClick={() => setItalic(!italic)}
+                        onClick={() => {
+                          setItalic(!italic);
+                          if (scanField) setScanDirty(true);
+                        }}
                         title="Italic"
                       >
                         <i>I</i>
                       </button>
                       <button
                         className={underline ? "pressed" : ""}
-                        onClick={() => setUnderline(!underline)}
+                        onClick={() => {
+                          setUnderline(!underline);
+                          if (scanField) setScanDirty(true);
+                        }}
                         title="Underline"
                       >
                         <u>U</u>
@@ -1363,9 +1618,10 @@ function App() {
                       <select
                         aria-label="Alignment"
                         value={align}
-                        onChange={(e) =>
-                          setAlign(e.target.value as typeof align)
-                        }
+                        onChange={(e) => {
+                          setAlign(e.target.value as typeof align);
+                          if (scanField) setScanDirty(true);
+                        }}
                       >
                         <option value="left">Left</option>
                         <option value="center">Center</option>
@@ -1393,31 +1649,48 @@ function App() {
                     </label>
                     <button
                       className="primary wide-button"
-                      disabled={busy || !text || (!span && tool !== "text")}
+                      disabled={
+                        busy ||
+                        !text ||
+                        (!span && !scanField && tool !== "text")
+                      }
                       onClick={() =>
                         void mutate(
-                          span
+                          scanField
                             ? {
-                                kind: "replace_text",
+                                kind: "replace_scan",
                                 page_id: page!.id,
+                                source_rect: scanField.source_rect,
                                 rect,
-                                source_rect: span.rect,
-                                original: span.text,
                                 ...style,
                               }
-                            : {
-                                kind: "text",
-                                page_id: page!.id,
-                                rect,
-                                ...style,
-                              },
+                            : span
+                              ? {
+                                  kind: "replace_text",
+                                  page_id: page!.id,
+                                  rect,
+                                  source_rect: span.rect,
+                                  original: span.text,
+                                  angle: span.angle || 0,
+                                  ...style,
+                                }
+                              : {
+                                  kind: "text",
+                                  page_id: page!.id,
+                                  rect,
+                                  ...style,
+                                },
                         )
                       }
                     >
                       <Check size={14} />{" "}
-                      {span ? "Apply text replacement" : "Insert text block"}
+                      {scanField
+                        ? "Apply scan replacement"
+                        : span
+                          ? "Apply text replacement"
+                          : "Insert text block"}
                     </button>
-                    {span && (
+                    {span && !scanField && (
                       <button
                         className="wide-button danger"
                         disabled={busy}
@@ -1447,14 +1720,18 @@ function App() {
                       <input
                         type="number"
                         value={Math.round(rect[i] * 10) / 10}
-                        onChange={(e) =>
+                        onChange={(e) => {
                           setRect(
                             (old) =>
                               old.map((v, n) =>
                                 n === i ? +e.target.value : v,
                               ) as Rect,
-                          )
-                        }
+                          );
+                          if (scanField) {
+                            setScanDirty(true);
+                            setScanField({ ...scanField, moved: true });
+                          }
+                        }}
                       />
                     </label>
                   ))}
@@ -1605,7 +1882,7 @@ function App() {
               <i>·</i>
               {(doc.size / 1024).toFixed(1)} KB<i>·</i>Revision {doc.revision}
             </span>
-            <span>PDF Studio Pro · 0.2.0</span>
+            <span>PDF Studio Pro · 0.3.0</span>
           </footer>
         </>
       ) : (
@@ -1725,6 +2002,8 @@ function App() {
               <h2 id="modal-title">
                 {
                   {
+                    discard: "Discard all changes",
+                    quit: "Quit PDF Studio Pro",
                     convert: "Convert documents",
                     ocr: "Make your PDF searchable",
                     signature: "Your signature",
@@ -1752,6 +2031,72 @@ function App() {
                 <X />
               </button>
             </div>
+            {modal === "discard" && (
+              <>
+                <p>
+                  Restore the original document and remove all page edits, text
+                  changes, images, signatures, and annotations added in this
+                  working copy? Undo history will be cleared. Your uploaded
+                  source file is unchanged.
+                </p>
+                <button
+                  className="wide-button danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      if (!doc) return;
+                      const next = await api<DocumentState>(
+                        `/documents/${doc.id}/discard`,
+                        json({ revision: doc.revision }),
+                      );
+                      adopt(next);
+                      setSelected([]);
+                      setText("");
+                      setAsset("");
+                      setAssetPending(false);
+                      setTextPending(false);
+                      setScanField(null);
+                      setScanDirty(false);
+                      setTool("select");
+                      setJob(null);
+                      setHits([]);
+                      setPassword("");
+                      setModal("");
+                      setMessage(
+                        "All changes discarded. The original document is restored.",
+                      );
+                    })
+                  }
+                >
+                  Discard all changes and restore original
+                </button>
+                <button className="wide-button" onClick={() => setModal("")}>
+                  Keep editing
+                </button>
+              </>
+            )}
+            {modal === "quit" && (
+              <>
+                <p>
+                  Stop the background app? Download any edited PDF you want to
+                  keep first. The local working copy can be reopened when you
+                  start the app again.
+                </p>
+                <button
+                  className="wide-button danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await api("/shutdown", { method: "POST" });
+                      setJob(null);
+                      setAppStopped(true);
+                    })
+                  }
+                >
+                  Quit app now
+                </button>
+              </>
+            )}
             {modal === "unlock" ? (
               <>
                 <p>
@@ -1922,9 +2267,11 @@ function App() {
             {modal === "jobs" && job && (
               <>
                 <p>
-                  {job.kind === "ocr"
-                    ? "OCR recognition"
-                    : "Document conversion"}{" "}
+                  {job.kind === "ocr_region"
+                    ? "Field recognition"
+                    : job.kind === "ocr"
+                      ? "OCR recognition"
+                      : "Document conversion"}{" "}
                   · {job.status}
                 </p>
                 <progress value={job.progress} max="1" />
@@ -1955,7 +2302,8 @@ function App() {
                     Cancel job
                   </button>
                 ) : (
-                  job.status === "done" && (
+                  job.status === "done" &&
+                  job.kind !== "ocr_region" && (
                     <>
                       <button
                         className="primary wide-button"
@@ -1996,6 +2344,40 @@ function App() {
                     </>
                   )
                 )}
+                {job.kind === "ocr_region" &&
+                  job.status === "done" &&
+                  job.region && (
+                    <>
+                      <p>
+                        Recognition confidence: {job.region.confidence}%. Check
+                        every character against the original image.
+                      </p>
+                      <p dir="auto">
+                        {job.region.text ||
+                          "No text recognized. Type the field manually or reselect a tighter area."}
+                      </p>
+                      <button
+                        className="primary wide-button"
+                        disabled={
+                          !scanField ||
+                          job.doc_id !== doc?.id ||
+                          job.revision !== doc?.revision ||
+                          job.page_id !== page?.id ||
+                          !job.region.text
+                        }
+                        onClick={() => {
+                          setText(job.region!.text);
+                          setScanDirty(true);
+                          setModal("");
+                          setMessage(
+                            "Review and correct the recognized field, then apply the scan replacement.",
+                          );
+                        }}
+                      >
+                        Use recognized text
+                      </button>
+                    </>
+                  )}
               </>
             )}
             {modal === "extract_signature" && (
@@ -2267,7 +2649,10 @@ function App() {
                   Watermark text
                   <input
                     value={text}
-                    onChange={(e) => setText(e.target.value)}
+                    onChange={(e) => {
+                      setText(e.target.value);
+                      if (scanField) setScanDirty(true);
+                    }}
                   />
                 </label>
                 <p className="hint">
@@ -2329,6 +2714,14 @@ function App() {
                   removed after 24 hours on service startup. Close a document to
                   remove its workspace immediately.
                 </p>
+                {health?.desktop_mode && (
+                  <button
+                    className="wide-button danger"
+                    onClick={() => setModal("quit")}
+                  >
+                    Quit app
+                  </button>
+                )}
                 <button className="wide-button" onClick={() => setDark(!dark)}>
                   {dark ? "Use light theme" : "Use dark theme"}
                 </button>

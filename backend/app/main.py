@@ -32,17 +32,30 @@ from .core import (
     expect,
     identifier,
     commit,
+    ensure_baseline,
+    discard_changes,
 )
-from .schemas import Mutation, HistoryRequest, ExportRequest, JobRequest, RegionExport
+from .schemas import (
+    Mutation,
+    HistoryRequest,
+    ExportRequest,
+    JobRequest,
+    RegionExport,
+    DiscardRequest,
+)
 from .services.pdf import apply, index
+from .services.content import text_spans
 from .services.runtime import ocr_status, office_binary
 from .services.extraction import embedded_png, region_png
 from .services.conversion import word_to_pdf, pdf_to_word, ocr_pdf, Cancelled
+
+from .version import VERSION
 
 log = logging.getLogger("studio")
 POOL = ThreadPoolExecutor(max_workers=2)
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+SHUTDOWN_EVENT = threading.Event()
 
 
 @asynccontextmanager
@@ -53,7 +66,7 @@ async def lifespan(app):
         job["cancel"].set()
 
 
-app = FastAPI(title="PDF Studio Pro", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="PDF Studio Pro", version=VERSION, lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -106,7 +119,13 @@ def health():
     return {
         "status": "ok",
         "app": "PDF Studio Pro",
-        "version": "0.2.0",
+        "version": VERSION,
+        "desktop_mode": os.getenv("STUDIO_DESKTOP") == "1",
+        "console_attached": bool(
+            __import__("ctypes").windll.kernel32.GetConsoleWindow()
+        )
+        if os.name == "nt" and os.getenv("STUDIO_DESKTOP") == "1"
+        else False,
         "libreoffice": bool(office_binary()),
         "ocr_languages": ocr["languages"],
         "ocr": ocr,
@@ -145,6 +164,7 @@ def new_document():
         "warnings": [],
     }
     store(doc_id, state)
+    ensure_baseline(doc_id, state)
     return describe(doc_id)
 
 
@@ -215,6 +235,8 @@ async def upload(file: UploadFile = File(...), password: str = Form("")):
         else:
             raise HTTPException(415, "File contents are not a PDF or DOCX document.")
         store(doc_id, state)
+        if state["kind"] == "pdf":
+            ensure_baseline(doc_id, state)
         return describe(doc_id)
     except Exception as e:
         shutil.rmtree(path, ignore_errors=True)
@@ -280,34 +302,27 @@ def objects(doc_id: str, pid: str):
         state = load(doc_id)
         with fitz.open(current(doc_id, state)) as pdf:
             p = pdf[index(page_ids(state), pid)]
-            spans = [
-                {
-                    "text": s["text"],
-                    "rect": list(s["bbox"]),
-                    "font": s["font"],
-                    "size": s["size"],
-                    "color": f"#{s['color']:06x}",
-                    "flags": s["flags"],
-                }
-                for b in p.get_text("dict")["blocks"]
-                if "lines" in b
-                for l in b["lines"]
-                for s in l["spans"]
-            ]
+            spans = text_spans(p)
+            bounds = p.rect * p.derotation_matrix
             images = [
                 {
                     "xref": i["xref"],
                     "rect": list(i["bbox"]),
                     "width": i["width"],
                     "height": i["height"],
+                    "background": (fitz.Rect(i["bbox"]) & bounds).get_area()
+                    / bounds.get_area()
+                    > 0.65,
                 }
                 for i in p.get_image_info(xrefs=True)
             ]
             return {
                 "spans": spans,
                 "images": images,
-                "scanned": not bool(spans),
-                "warning": "Replacement uses fallback fonts. Review typography and complex scripts before export.",
+                "scanned": any(i["background"] for i in images)
+                or not any(s["source"] == "native" for s in spans),
+                "has_ocr": any(s["source"] == "ocr" for s in spans),
+                "warning": "OCR text is a recognition aid, not the visible scan. Review it before replacing an image region.",
             }
 
 
@@ -330,6 +345,29 @@ def mutate(doc_id: str, body: Mutation):
             ids = apply(pdf, page_ids(state), body.operation, doc_id)
             commit(doc_id, pdf, ids, state)
         return describe(doc_id)
+
+
+@app.post("/api/documents/{doc_id}/discard")
+def discard(doc_id: str, body: DiscardRequest):
+    with locked(doc_id):
+        state = load(doc_id)
+        expect(state, body.revision)
+        if state["kind"] != "pdf":
+            raise HTTPException(422, "There are no PDF edits to discard.")
+        discard_changes(doc_id, state)
+        with JOBS_LOCK:
+            for job in JOBS.values():
+                if job["doc_id"] == doc_id and job["status"] in ("queued", "running"):
+                    job["cancel"].set()
+        return describe(doc_id)
+
+
+@app.post("/api/shutdown")
+def shutdown():
+    if os.getenv("STUDIO_DESKTOP") != "1":
+        raise HTTPException(409, "Stop the development server from its terminal.")
+    SHUTDOWN_EVENT.set()
+    return {"stopping": True}
 
 
 @app.post("/api/documents/{doc_id}/history")
@@ -499,6 +537,10 @@ def create_job(doc_id: str, body: JobRequest):
         state = load(doc_id)
         if (body.kind == "word_pdf") != (state["kind"] == "docx"):
             raise HTTPException(422, "Choose a conversion matching the document type.")
+        if body.kind == "ocr_region":
+            if not body.page_id or not body.rect:
+                raise HTTPException(422, "Select a page region first.")
+            page_index = index(page_ids(state), body.page_id)
         with JOBS_LOCK:
             if sum(j["status"] in ("queued", "running") for j in JOBS.values()) >= 8:
                 raise HTTPException(429, "Job queue is full. Wait for a job to finish.")
@@ -510,6 +552,9 @@ def create_job(doc_id: str, body: JobRequest):
                 "progress": 0,
                 "cancel": threading.Event(),
                 "kind": body.kind,
+                "page_index": page_index if body.kind == "ocr_region" else None,
+                "page_id": body.page_id,
+                "revision": state["revision"],
                 "warnings": [],
             }
             JOBS[jid] = job
@@ -541,7 +586,7 @@ def run_job(job, source, body, revision):
 
     output = (
         folder(job["doc_id"])
-        / f"job-{job['id']}.{'docx' if body.kind == 'docx' else 'pdf'}"
+        / f"job-{job['id']}.{'docx' if body.kind == 'docx' else 'region.json' if body.kind == 'ocr_region' else 'pdf'}"
     )
     status = folder(job["doc_id"]) / f"job-{job['id']}.json"
     job["status"] = "running"
@@ -553,6 +598,7 @@ def run_job(job, source, body, revision):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
         else:
             try:
@@ -574,6 +620,7 @@ def run_job(job, source, body, revision):
             body.kind,
             body.language,
             body.mode,
+            json.dumps({**body.model_dump(), "page_index": job.get("page_index")}),
         ]
         with subprocess.Popen(
             command,
@@ -581,6 +628,7 @@ def run_job(job, source, body, revision):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=os.name != "nt",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ) as proc:
             deadline = time.monotonic() + TIMEOUT * max(
                 1, len(page_ids(load(job["doc_id"]))) if body.kind == "ocr" else 1
@@ -656,7 +704,13 @@ def download_job(jid: str):
     j = get_job(jid)
     if j["status"] != "done":
         raise HTTPException(409, "Job has not completed successfully.")
-    ext = "docx" if j["kind"] == "docx" else "pdf"
+    ext = (
+        "docx"
+        if j["kind"] == "docx"
+        else "region.json"
+        if j["kind"] == "ocr_region"
+        else "pdf"
+    )
     return FileResponse(
         folder(j["doc_id"]) / f"job-{jid}.{ext}", filename=f"PDF-Studio-converted.{ext}"
     )

@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import HTTPException
 import pymupdf as fitz
 from ..core import folder, identifier, load, current, page_ids, MAX_PAGES
+from .content import text_spans
+from .scan_editor import erase_simple_images
 
 
 def rgb(value):
@@ -100,7 +102,7 @@ def apply(doc, ids, op, doc_id):
                 )
                 target = display * p.derotation_matrix
                 css = "@font-face {font-family:studio;src:url(DejaVuSans.ttf);} * {font-family:studio;}"
-                content = f'<div dir="rtl" style="font-size:{op.font_size}pt;color:{op.color}">{html.escape(text)}</div>'
+                content = f'<div dir="rtl" style="margin:0;padding:0;line-height:1.05;font-size:{op.font_size}pt;color:{op.color}">{html.escape(text)}</div>'
                 spare, _ = p.insert_htmlbox(
                     target,
                     content,
@@ -173,7 +175,7 @@ def apply(doc, ids, op, doc_id):
         return ids
     r = rectangle(op, p)
     color = rgb(op.color)
-    if kind in ("replace_text", "text"):
+    if kind in ("replace_text", "replace_scan", "text"):
         families = {
             "helv": ["helv", "hebo", "heit", "hebi"],
             "tiro": ["tiro", "tibo", "tiit", "tibi"],
@@ -199,8 +201,38 @@ def apply(doc, ids, op, doc_id):
                 raise HTTPException(
                     409, "Text span changed or selection is ambiguous. Select it again."
                 )
+            if any(
+                s["source"] == "ocr"
+                and s["text"] == op.original
+                and fitz.Rect(s["rect"]).intersects(source_rect)
+                for s in text_spans(p)
+            ):
+                raise HTTPException(
+                    422,
+                    "This is OCR text over a scanned image. Use Scan text editing to replace the visible image region.",
+                )
             p.add_redact_annot(source_rect, fill=False)
             p.apply_redactions(images=0, graphics=0, text=0)
+        if kind == "replace_scan":
+            source_op = op.model_copy(update={"rect": op.source_rect or op.rect})
+            source = rectangle(source_op, p)
+            if not any(
+                fitz.Rect(image["bbox"]).intersects(source)
+                for image in p.get_image_info()
+            ):
+                raise HTTPException(
+                    422,
+                    "No scanned image is present in this area. Select native text instead.",
+                )
+            samples_erased = erase_simple_images(doc, p, source)
+            p.add_redact_annot(source, fill=rgb(op.background_color))
+            p.apply_redactions(
+                images=0 if samples_erased else fitz.PDF_REDACT_IMAGE_PIXELS,
+                graphics=0,
+                text=0,
+            )
+        if not op.text:
+            return ids
         # Fit first on a temporary page; an overflow aborts the whole revision.
         probe = fitz.open()
         test = probe.new_page(width=p.mediabox.width, height=p.mediabox.height)
@@ -209,65 +241,93 @@ def apply(doc, ids, op, doc_id):
             direction = (
                 "rtl" if any("\u0600" <= c <= "\u06ff" for c in op.text) else "ltr"
             )
-            content = f'<div dir="{direction}" style="font-size:{op.font_size}pt;color:{op.color};text-align:{op.align};font-weight:{"bold" if op.bold else "normal"};font-style:{"italic" if op.italic else "normal"}">{html.escape(op.text).replace(chr(10), "<br>")}</div>'
+            content = f'<div dir="{direction}" style="margin:0;padding:0;line-height:1.05;font-size:{op.font_size}pt;color:{op.color};text-align:{op.align};font-weight:{"bold" if op.bold else "normal"};font-style:{"italic" if op.italic else "normal"}">{html.escape(op.text).replace(chr(10), "<br>")}</div>'
             font_dir = Path(__file__).resolve().parents[1] / "fonts"
             css = "@font-face {font-family: studio; src: url(DejaVuSans.ttf);} * {font-family: studio;}"
             archive = fitz.Archive(str(font_dir))
             spare, _ = test.insert_htmlbox(
-                r, content, scale_low=1, css=css, archive=archive, rotate=op.angle
+                r,
+                content,
+                scale_low=max(0.01, 4 / op.font_size) if op.fit_text else 1,
+                css=css,
+                archive=archive,
+                rotate=op.angle,
             )
             if spare < 0:
                 raise HTTPException(
                     422, "Text overflows its box. Enlarge the box or reduce font size."
                 )
             p.insert_htmlbox(
-                r, content, scale_low=1, css=css, archive=archive, rotate=op.angle
+                r,
+                content,
+                scale_low=max(0.01, 4 / op.font_size) if op.fit_text else 1,
+                css=css,
+                archive=archive,
+                rotate=op.angle,
             )
         else:
             # Extracted glyph boxes include ascender/descender metrics; preserve baseline for a single span.
-            if kind == "replace_text" and "\n" not in op.text and op.align == "left":
+            if (
+                kind in ("replace_text", "replace_scan")
+                and "\n" not in op.text
+                and op.align == "left"
+                and op.angle == 0
+            ):
                 f = fitz.Font(fontname=font)
-                if f.text_length(op.text, fontsize=op.font_size) > r.width + 0.5:
-                    raise HTTPException(
-                        422,
-                        "Replacement is wider than the selected span. Reduce font size or use a larger text block.",
+                required_width = f.text_length(op.text, fontsize=1)
+                size = op.font_size
+                if op.fit_text:
+                    size = min(
+                        size,
+                        r.width / max(0.001, required_width),
+                        r.height / (f.ascender - f.descender),
                     )
-                if (
-                    op.text
-                    and op.font_size * (f.ascender - f.descender) > r.height + 0.5
+                    if size < 4:
+                        raise HTTPException(
+                            422,
+                            "Text would be smaller than 4 pt. Enlarge the box or shorten the replacement.",
+                        )
+                elif (
+                    required_width * size > r.width + 0.5
+                    or size * (f.ascender - f.descender) > r.height + 0.5
                 ):
                     raise HTTPException(
                         422,
-                        "Replacement is taller than its box. Enlarge the box or reduce font size.",
+                        "Replacement does not fit its box. Enable Fit text to box, enlarge the box, or reduce font size.",
                     )
-                baseline = r.y0 + op.font_size * f.ascender
+                baseline = r.y0 + size * f.ascender
                 p.insert_text(
                     (r.x0, baseline),
                     op.text,
                     fontname=font,
-                    fontsize=op.font_size,
+                    fontsize=size,
                     color=color,
                 )
             else:
-                spare = test.insert_textbox(
-                    r,
-                    op.text,
-                    fontname=font,
-                    fontsize=op.font_size,
-                    color=color,
-                    align=align,
-                    rotate=op.angle,
-                )
-                if spare < 0:
-                    raise HTTPException(
-                        422,
-                        "Text overflows its box. Enlarge the box or reduce font size.",
+                size = op.font_size
+                for attempt in range(60):
+                    spare = test.insert_textbox(
+                        r,
+                        op.text,
+                        fontname=font,
+                        fontsize=size,
+                        color=color,
+                        align=align,
+                        rotate=op.angle,
                     )
+                    if spare >= 0:
+                        break
+                    if not op.fit_text or size <= 4:
+                        raise HTTPException(
+                            422,
+                            "Text overflows its box. Enlarge the box or enable automatic fitting.",
+                        )
+                    size = max(4, size * 0.9)
                 p.insert_textbox(
                     r,
                     op.text,
                     fontname=font,
-                    fontsize=op.font_size,
+                    fontsize=size,
                     color=color,
                     align=align,
                     rotate=op.angle,

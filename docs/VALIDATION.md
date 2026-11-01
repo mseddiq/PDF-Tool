@@ -1,4 +1,25 @@
-# Validation evidence — 0.2.0 review
+# Validation evidence — 0.3.0 scan and desktop update
+
+Local validation completed on 2026-11-02:
+
+| Check                | Observed outcome                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Backend suite        | **59 passed**, no failures/skips; one upstream Starlette/AnyIO deprecation warning                           |
+| Full browser suite   | **40 passed** against a fresh production server; uncaught JavaScript errors fail tests                       |
+| Production build     | TypeScript and Vite passed                                                                                   |
+| Python static checks | Ruff E9/F63/F7/F82 passed                                                                                    |
+| PowerShell           | All scripts parsed; native prerequisite regression passed with real Python/Node and legacy argument handling |
+| Whitespace           | git diff --check passed                                                                                      |
+
+The new backend checks cover actual scan-pixel removal, soft/hard masks, retained color spaces, OCR provenance and word geometry, field recognition, tight-box fitting, baseline reset after history pruning, password-protected sources, legacy migration, and background server startup/shutdown. New browser checks exercise scan selection, pointer resize, regional recognition/review/correction/export, Discard, keyboard resize on all quarter-turn page rotations, and the desktop Quit interface. Existing conversion, signature, annotation, history, organizer, password and utility regressions also passed.
+
+A user-supplied nine-page PDF was checked **locally only**. Focused numeric-date recognition matched the displayed date; the changed date persisted after export; the other eight pages rendered identically; full-page OCR preserved the original page pixels. The edited first page uses a layered hard image mask. Its re-encoding produced small edge-rendering differences outside the selected field (mean absolute RGB channel difference approximately 0.10 on a 0–255 scale at the default render scale). Compatible decoded samples outside the field were preserved; this is not a claim of pixel-identical rendering of the edited page. The supplied file, page images and extracted contents are not committed or uploaded to CI. Tests use generated fixtures.
+
+Remote Windows/Linux verification for this update is recorded below once observed. The previous release's CI result does not establish that this update passed.
+
+## Previous release evidence
+
+### 0.2.0 review
 
 Executed in the Linux managed cloud environment on 2026-11-01, followed by successful GitHub-hosted Windows and Linux verification:
 

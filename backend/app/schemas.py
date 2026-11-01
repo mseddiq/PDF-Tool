@@ -6,6 +6,7 @@ class Operation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal[
         "replace_text",
+        "replace_scan",
         "text",
         "image",
         "delete_image",
@@ -31,6 +32,8 @@ class Operation(BaseModel):
     text: str = Field(default="", max_length=100000)
     original: str | None = None
     font: Literal["helv", "tiro", "cour"] = "helv"
+    fit_text: bool = True
+    background_color: str = "#ffffff"
     font_size: float = Field(default=12, ge=4, le=300)
     color: str = "#172033"
     behind: bool = False
@@ -76,9 +79,17 @@ class ExportRequest(BaseModel):
 
 
 class JobRequest(BaseModel):
-    kind: Literal["ocr", "docx", "word_pdf"]
+    kind: Literal["ocr", "ocr_region", "docx", "word_pdf"]
     language: Literal["eng", "ara", "eng+ara"] = "eng"
     mode: Literal["editable", "layout"] = "editable"
+    page_id: str | None = None
+    rect: tuple[float, float, float, float] | None = None
+    dpi: int = Field(default=300, ge=150, le=600)
+    recognition_mode: Literal["auto", "line", "numbers"] = "auto"
+
+
+class DiscardRequest(BaseModel):
+    revision: int
 
 
 class RegionExport(BaseModel):

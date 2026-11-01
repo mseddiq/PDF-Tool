@@ -1,6 +1,6 @@
 # PDF Studio Pro
 
-Version **0.2.0** includes a feature review, existing-signature PNG export, repaired OCR, and expanded regression coverage. See [review findings](docs/REVIEW.md).
+Version **0.3.0** adds scanned-field replacement, reviewed regional OCR, reliable resize handles, Discard all changes, and a Windows background launcher. See [scan editing notes](docs/SCAN-EDITING.md).
 
 A local React/TypeScript + FastAPI PDF workspace. Open real PDFs, replace supported native text using actual content redaction, organize pages, insert images/signatures, annotate, convert documents and run local OCR. No account, paid API, telemetry, remote fonts, or external document uploads.
 
@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 ```
 
-The browser opens the local service on port 8000. Keep the terminal open; Ctrl+C stops it. Installation needs Internet; built application use does not. The application passed Windows CI. The full interactive installer has not been exercised on your specific PC.
+The desktop shortcut opens the local service on port 8000 without a console. Use **Settings → Quit app** to stop it; closing the browser alone leaves it running. The manual PowerShell developer launcher keeps a terminal and uses Ctrl+C. Installation needs Internet; built application use does not. See the current [validation evidence](docs/VALIDATION.md).
 
 ## Linux / macOS
 
@@ -40,7 +40,9 @@ Vite proxies `/api` to the loopback backend. The production build is served by F
 ## Use
 
 - Drop a PDF/DOCX on the dashboard, or choose Open. Encrypted PDFs prompt for their valid password.
-- Click a native text span. Edit text/style in Properties, then Apply. Font fallback is explicit, and too-wide text is rejected without changing the revision. Text selection boxes can be moved/resized through point coordinates in Properties. Larger new text blocks support multiple lines; native paragraphs do not reflow automatically.
+- Click a native text span. Edit text/style in Properties, then Apply. Font fallback is explicit. **Fit text to box** shrinks replacements when needed, with a 4 pt minimum; disable it for strict overflow rejection. Move boxes by dragging and resize with any of eight handles (or arrow keys, Shift for larger steps). Coordinates are also editable in Properties. Larger new text blocks support multiple lines; native paragraphs do not reflow automatically.
+- For image-based text, choose **Edit scanned field**, draw around the entire visible field, then type the replacement or use **Recognize selected field**. For dates choose **Numbers / dates**, English and 400 DPI. Compare against the original-area preview, correct mistakes, then **Apply scan replacement**. This edits image pixels and adds fallback text; OCR alone only adds an invisible searchable layer. See [scan editing](docs/SCAN-EDITING.md).
+- **Discard** restores the initially opened PDF and clears every edit, page change and draft. Confirm before discarding; this reset cannot be undone. Your original file on disk is unchanged.
 - To save an existing signature as PNG, choose **Extract signature PNG**, drag tightly around it, then download. Optional near-white paper removal makes the PNG transparent; it can remove faint marks. Select an embedded image and choose **Export selected image as PNG** to preserve its original pixel dimensions and alpha.
 - Choose Add text, enter content and drag a box, then Insert. For images, upload then drag the placement rectangle. Drawn, uploaded and typed signatures are placed on the current page immediately, ready to reposition. Undo removes inserted content. Visual signatures are not digital certificates.
 - Thumbnails support drag sorting, keyboard sorting (Space, arrows, Space), multi-selection, rotation, deletion, duplication and blank insertion. Add pages imports another PDF with an inclusion/order preview. Split/extract exports the checked pages; repeat for each desired range.

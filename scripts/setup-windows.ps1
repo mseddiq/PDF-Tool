@@ -63,7 +63,9 @@ if ($desktop) {
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path $desktop 'PDF Studio Pro.lnk'))
-        $shortcut.TargetPath = Join-Path $project 'Start-PDF-Studio.cmd'
+        $shortcut.TargetPath = Join-Path $project '.venv\Scripts\pythonw.exe'
+        $shortcut.Arguments = '"' + (Join-Path $project 'scripts\desktop.py') + '"'
+        $shortcut.WindowStyle = 7
         $shortcut.WorkingDirectory = $project
         $shortcut.Description = 'Open PDF Studio Pro privately on this PC'
         $shortcut.Save()

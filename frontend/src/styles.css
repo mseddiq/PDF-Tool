@@ -1283,3 +1283,95 @@ details p {
   white-space: nowrap;
   pointer-events: none;
 }
+.resize-handle {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px;
+  padding: 0 !important;
+  border: 1px solid #26745b;
+  background: #fff;
+  border-radius: 3px;
+  touch-action: none;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  right: auto;
+  bottom: auto;
+}
+.resize-handle:hover,
+.resize-handle:focus-visible {
+  background: #b8e8d2;
+  outline: 2px solid #26745b;
+  outline-offset: 2px;
+}
+.handle-nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.handle-n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.handle-ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.handle-e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.handle-se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.handle-s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.handle-sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.handle-w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.scan-preview {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  margin: 12px 0;
+}
+.scan-preview strong {
+  font-size: 11px;
+}
+.scan-preview img {
+  width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  background: white;
+  margin-top: 8px;
+}
+.scan-preview p {
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.app-closed {
+  max-width: 500px;
+  margin: 20vh auto;
+  padding: 30px;
+  background: var(--bg);
+  text-align: center;
+  border-radius: 12px;
+}
+.tool-scan_text {
+  cursor: crosshair;
+}

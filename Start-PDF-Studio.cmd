@@ -1,14 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
+if not exist ".venv\Scripts\pythonw.exe" (
  echo Please double-click Setup-Windows.cmd first.
  pause
  exit /b 1
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start.ps1"
-if errorlevel 1 (
- echo PDF Studio could not start. Read the message above.
- pause
- exit /b 1
-)
+start "" "%~dp0.venv\Scripts\pythonw.exe" "%~dp0scripts\desktop.py"
+exit /b 0
