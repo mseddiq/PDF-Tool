@@ -8,7 +8,7 @@ A local React/TypeScript + FastAPI PDF workspace. Open real PDFs, replace suppor
 
 ## Windows 10/11 installation
 
-**Easy Windows setup:** download the GitHub ZIP, extract it, and double-click `Setup-Windows.cmd`. After setup, use the **PDF Studio Pro** desktop shortcut or `Start-PDF-Studio.cmd`. No manual terminal commands are needed. See the [Windows step-by-step guide](docs/WINDOWS.md). The scripts have not yet been executed on Windows.
+**Easy Windows setup:** download the GitHub ZIP, extract it, and double-click `Setup-Windows.cmd`. After setup, use the **PDF Studio Pro** desktop shortcut or `Start-PDF-Studio.cmd`. No manual terminal commands are needed. See the [Windows step-by-step guide](docs/WINDOWS.md). Application tests and the helper/model scripts passed Windows CI; interactive installer prompts still need validation on your PC.
 
 Install Python 3.12+, Node.js 22+ (24 tested), [LibreOffice](https://www.libreoffice.org/download/download-libreoffice/) and [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html). The recommended Setup-Windows.cmd installs checksum-verified `eng` and `ara` data in your user-local app folder. If they are missing, double-click `Install-OCR-Languages.cmd`, then choose **Refresh OCR status** inside the app. The launch script detects the usual Program Files locations; otherwise add the binaries to PATH. Use a standard PowerShell terminal:
 
@@ -17,7 +17,7 @@ powershell -ExecutionPolicy Bypass -File scripts/install.ps1
 powershell -ExecutionPolicy Bypass -File scripts/start.ps1
 ```
 
-The browser opens the local service on port 8000. Keep the terminal open; Ctrl+C stops it. Installation needs Internet; built application use does not. Windows scripts are supplied but have not been executed on Windows in this Linux development environment.
+The browser opens the local service on port 8000. Keep the terminal open; Ctrl+C stops it. Installation needs Internet; built application use does not. The application passed Windows CI. The full interactive installer has not been exercised on your specific PC.
 
 ## Linux / macOS
 

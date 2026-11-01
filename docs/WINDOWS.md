@@ -21,7 +21,7 @@ Installation needs Internet. Normal PDF editing works offline afterward. Word co
 - **Moved/deleted project folder:** the desktop shortcut points at the extracted folder. Keep it in place, or rerun setup to recreate the shortcut after moving it.
 - **Updating from GitHub:** keep a backup of local documents; extract a new copy and run setup in that copy. The new copy's shortcut replaces the old shortcut. Never paste a Linux/cloud `.venv` into Windows.
 
-The scripts target Windows PowerShell 5.1 and Windows 10/11. They were reviewed in Linux but have not been executed on a Windows PC here. The first Windows run is still required to verify installer availability, language packs and machine-specific settings.
+The scripts target Windows PowerShell 5.1 and Windows 10/11. The application feature suites, native prerequisite helper and OCR model installer passed on a GitHub-hosted Windows runner (see VALIDATION.md). The interactive winget/UAC setup and your specific Windows 11 Pro machine policies still need a local run.
 
 ## Extract your existing signature as PNG
 
