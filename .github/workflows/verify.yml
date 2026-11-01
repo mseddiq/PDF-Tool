@@ -1,0 +1,82 @@
+name: PDF Studio feature checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  features:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Linux document tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libreoffice-writer tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara
+      - name: Install Windows document tools and verified OCR models
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install libreoffice-fresh tesseract --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Document tool installation failed' }
+          & ./scripts/install-ocr-languages.ps1
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\LibreOffice\program'
+          Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Tesseract-OCR'
+      - name: Prepare Python environment (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r backend/requirements.lock
+      - name: Prepare Python environment (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          & ./.venv/Scripts/python.exe -m pip install -r backend/requirements.lock
+          if ($LASTEXITCODE -ne 0) { throw 'Python installation failed' }
+          & ./tests/windows-prerequisites.ps1 -PythonPath (Resolve-Path ./.venv/Scripts/python.exe).Path -NodePath (Get-Command node.exe).Source
+      - name: Backend feature tests (Linux)
+        if: runner.os == 'Linux'
+        run: .venv/bin/python -m pytest tests -q
+      - name: Backend feature tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & ./.venv/Scripts/python.exe -m pytest tests -q
+          if ($LASTEXITCODE -ne 0) { throw 'Backend checks failed' }
+      - name: Frontend install and production build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Install Chromium for browser checks
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser feature checks
+        working-directory: frontend
+        env:
+          CI: "true"
+          STUDIO_TEST_BROWSER: bundled
+        run: npm run test:e2e
+      - name: Retain synthetic test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-checks-${{ matrix.os }}
+          path: frontend/test-results
+          retention-days: 7
+          if-no-files-found: ignore
