@@ -4,7 +4,7 @@ Local validation completed on 2026-11-02:
 
 | Check                | Observed outcome                                                                                             |
 | -------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Backend suite        | **59 passed**, no failures/skips; one upstream Starlette/AnyIO deprecation warning                           |
+| Backend suite        | **60 passed**, no failures/skips; one upstream Starlette/AnyIO deprecation warning                           |
 | Full browser suite   | **40 passed** against a fresh production server; uncaught JavaScript errors fail tests                       |
 | Production build     | TypeScript and Vite passed                                                                                   |
 | Python static checks | Ruff E9/F63/F7/F82 passed                                                                                    |
@@ -15,7 +15,11 @@ The new backend checks cover actual scan-pixel removal, soft/hard masks, retaine
 
 A user-supplied nine-page PDF was checked **locally only**. Focused numeric-date recognition matched the displayed date; the changed date persisted after export; the other eight pages rendered identically; full-page OCR preserved the original page pixels. The edited first page uses a layered hard image mask. Its re-encoding produced small edge-rendering differences outside the selected field (mean absolute RGB channel difference approximately 0.10 on a 0–255 scale at the default render scale). Compatible decoded samples outside the field were preserved; this is not a claim of pixel-identical rendering of the edited page. The supplied file, page images and extracted contents are not committed or uploaded to CI. Tests use generated fixtures.
 
-Remote Windows/Linux verification for this update is recorded below once observed. The previous release's CI result does not establish that this update passed.
+## Remote verification for 0.3.0
+
+[GitHub run 41354375836](https://github.com/mseddiq/PDF-Tool/actions/runs/41354375836), application commit `a00accd`, completed with **Success** in 4m 44s. Both Ubuntu 24.04 and Windows jobs passed the backend suite, production build, and full 40-case browser suite. The Windows backend run exercises the background service's no-attached-console assertion and graceful shutdown; native prerequisite checks and verified OCR model installation also passed. The final application commit `519c258`, including the empty-page guidance correction, also passed both jobs in [GitHub run 41354650760](https://github.com/mseddiq/PDF-Tool/actions/runs/41354650760), **Success** in 3m 44s. That final run includes all 60 backend and 40 browser tests on both operating systems.
+
+Successful hosted Windows checks do not certify every interactive winget/UAC prompt or the user's particular PC. The private supplied PDF was tested locally, not in CI.
 
 ## Previous release evidence
 
