@@ -12,6 +12,7 @@ Installation needs Internet. Normal PDF editing works offline afterward. Word co
 
 ## If setup needs help
 
+- **Setup stops at `python.exe: File "<string>", line 1`:** this was a quoting bug in the first Windows setup helper. Download the latest ZIP, extract it into a new folder, and run its Setup-Windows.cmd. The corrected checks use `--version` for both Python and Node and skip broken candidates without aborting setup.
 - **winget missing:** install Microsoft's **App Installer** through Microsoft Store, then rerun Setup-Windows.cmd. Alternatively, install Python 3.12 and Node.js LTS from their official sites first. If optional Office/OCR installation is unavailable, answer `n` to skip it and add those tools later.
 - **Arabic OCR unavailable:** install the Arabic `ara.traineddata` language data matching Tesseract and place it in its `tessdata` directory. The OCR dialog lists detected languages; do not assume Arabic is included by the Windows installer.
 - **Windows shows a warning:** these source scripts are not digitally signed. Inspect them or ask for help if you are unsure; do not disable Windows security globally.

@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $project = (Get-Location).Path
+. "$PSScriptRoot\windows-prerequisites.ps1"
 function Refresh-CommandPath {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
 }
@@ -11,8 +12,7 @@ function Find-Python {
     if ($command -and $command.Source -notmatch 'WindowsApps') { $candidates += $command.Source }
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate) {
-            $version = & $candidate -c 'import sys; print("%s.%s" % sys.version_info[:2])' 2>$null
-            if ($LASTEXITCODE -eq 0 -and $version -eq '3.12') { return $candidate }
+            if (Test-StudioPython $candidate) { return $candidate }
         }
     }
     return $null
@@ -39,8 +39,7 @@ if (-not $python) {
 $nodeReady = $false
 $node = Get-Command node.exe -ErrorAction SilentlyContinue
 if ($node) {
-    $major = & $node.Source -p 'process.versions.node.split(".")[0]'
-    $nodeReady = $LASTEXITCODE -eq 0 -and [int]$major -ge 22
+    $nodeReady = Test-StudioNode $node.Source
 }
 if (-not $nodeReady) { Install-Package 'OpenJS.NodeJS.LTS' 'https://nodejs.org/' }
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm is not available. Restart Setup-Windows.cmd after installing Node.js LTS.' }

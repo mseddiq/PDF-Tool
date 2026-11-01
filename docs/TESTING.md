@@ -1,5 +1,7 @@
 # Validation
 
+Windows prerequisite detection can be checked with `powershell -NoProfile -File tests/windows-prerequisites.ps1 -PythonPath <python-3.12-executable> -NodePath <node-22+-executable>`. This exercises actual native version commands, wrong executables, stderr failures, missing paths, unsupported Node versions, paths containing spaces, and error-preference restoration. It also runs under PowerShell 7 with legacy argument passing; passing there does not replace executing the full installer on Windows.
+
 The backend integration suite generates its own PDF/image/Word fixtures and reopens outputs. It covers 10-page uploads/rendering; content removal on page 3; exact unchanged-page and unrelated-region pixel preservation; failed-edit atomicity and stale revisions; three-document merge; delete/reorder/duplicate/rotate/blank/extract; undo/redo; transparent image/signature insertion; annotation persistence; encryption/passwords; invalid uploads and origin/host guards; Arabic shaping with Unicode normalization; crop; 100-page processing; DOCX text and table reconstruction; real Word rendering when LibreOffice is present; OCR searchability/confidence; moved text; moved/translucent images; all annotation types; failed export recovery; cancellation; and explicit close/cleanup.
 
 Run from repository root:
