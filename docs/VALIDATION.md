@@ -11,7 +11,11 @@ Font matching on scans compares three available candidates and remains approxima
 
 Phone testing covers responsive desktop-browser emulation and HTTP access-policy checks. Actual Android/iOS file workflows, home-screen installation and the PC-to-phone Tailscale connection require testing on the owner's hardware. No private network or public deployment was activated by this change. The owner must configure Tailscale membership/access policy; the app has no multi-user login. See [phone instructions](PHONE.md).
 
-Remote Windows/Linux results for this update are added below after observation. Prior releases' CI successes do not establish this update's status.
+## Remote Windows and Linux results for 0.4.0
+
+[GitHub run 41437233239](https://github.com/mseddiq/PDF-Tool/actions/runs/41437233239), application commit `59c75ca`, completed with **Success** in 7m 24s. Both Ubuntu 24.04 and Windows jobs passed all **72 backend tests**, the production build and all **43 browser tests**. Windows also passed its native prerequisite helper and checksum-verified OCR model installation. Only upstream GitHub Action Node runtime deprecation warnings were reported.
+
+This verifies the application on hosted Windows and Linux runners. Interactive winget/UAC installation, actual Android/iOS hardware and a real user-owned Tailscale connection remain outside those automated results.
 
 ## Earlier release evidence
 
