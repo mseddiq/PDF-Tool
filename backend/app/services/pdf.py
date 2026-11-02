@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import HTTPException
 import pymupdf as fitz
 from ..core import folder, identifier, load, current, page_ids, MAX_PAGES
-from .content import text_spans
+from .content import text_spans, original_font
 from .scan_editor import erase_simple_images
 
 
@@ -181,7 +181,10 @@ def apply(doc, ids, op, doc_id):
             "tiro": ["tiro", "tibo", "tiit", "tibi"],
             "cour": ["cour", "cobo", "coit", "cobi"],
         }
-        font = families[op.font][int(op.bold) + 2 * int(op.italic)]
+        font = families.get(op.font, families["helv"])[
+            int(op.bold) + 2 * int(op.italic)
+        ]
+        font_buffer = None
         complex_script = any(ord(c) > 255 for c in op.text)
         if kind == "replace_text":
             source_rect = fitz.Rect(op.source_rect) if op.source_rect else r
@@ -201,6 +204,35 @@ def apply(doc, ids, op, doc_id):
                 raise HTTPException(
                     409, "Text span changed or selection is ambiguous. Select it again."
                 )
+            if op.font == "original":
+                matching = next(
+                    s
+                    for s in spans
+                    if s["text"] == op.original
+                    and max(abs(s["bbox"][i] - source_rect[i]) for i in range(4)) < 1
+                )
+                font_buffer = original_font(p, matching["font"])
+                if complex_script or not font_buffer:
+                    raise HTTPException(
+                        422,
+                        "This font cannot be reused for this text. Choose an explicit fallback font.",
+                    )
+                embedded = fitz.Font(fontbuffer=font_buffer)
+                if any(
+                    not embedded.has_glyph(ord(c)) for c in op.text if not c.isspace()
+                ):
+                    raise HTTPException(
+                        422,
+                        "The embedded font lacks a replacement character. Choose a fallback font.",
+                    )
+                if op.bold != bool(matching["flags"] & 16) or op.italic != bool(
+                    matching["flags"] & 2
+                ):
+                    raise HTTPException(
+                        422,
+                        "Original font preserves its original style. Choose a fallback to change bold or italic.",
+                    )
+                font = "StudioOriginal"
             if any(
                 s["source"] == "ocr"
                 and s["text"] == op.original
@@ -233,9 +265,16 @@ def apply(doc, ids, op, doc_id):
             )
         if not op.text:
             return ids
+        if op.font == "original" and kind != "replace_text":
+            raise HTTPException(
+                422, "Original font is available only for selected native text."
+            )
         # Fit first on a temporary page; an overflow aborts the whole revision.
         probe = fitz.open()
         test = probe.new_page(width=p.mediabox.width, height=p.mediabox.height)
+        if font_buffer:
+            p.insert_font(fontname=font, fontbuffer=font_buffer)
+            test.insert_font(fontname=font, fontbuffer=font_buffer)
         align = {"left": 0, "center": 1, "right": 2}[op.align]
         if complex_script:
             direction = (
@@ -273,14 +312,26 @@ def apply(doc, ids, op, doc_id):
                 and op.align == "left"
                 and op.angle == 0
             ):
-                f = fitz.Font(fontname=font)
+                f = (
+                    fitz.Font(fontbuffer=font_buffer)
+                    if font_buffer
+                    else fitz.Font(fontname=font)
+                )
                 required_width = f.text_length(op.text, fontsize=1)
+                glyphs = [f.glyph_bbox(ord(c)) for c in op.text if not c.isspace()]
+                scan_top = max((g.y1 for g in glyphs), default=f.ascender)
+                scan_bottom = min((g.y0 for g in glyphs), default=f.descender)
+                vertical = (
+                    max(0.01, scan_top - scan_bottom)
+                    if kind == "replace_scan"
+                    else f.ascender - f.descender
+                )
                 size = op.font_size
                 if op.fit_text:
                     size = min(
                         size,
                         r.width / max(0.001, required_width),
-                        r.height / (f.ascender - f.descender),
+                        r.height / vertical,
                     )
                     if size < 4:
                         raise HTTPException(
@@ -289,13 +340,15 @@ def apply(doc, ids, op, doc_id):
                         )
                 elif (
                     required_width * size > r.width + 0.5
-                    or size * (f.ascender - f.descender) > r.height + 0.5
+                    or size * vertical > r.height + 0.5
                 ):
                     raise HTTPException(
                         422,
                         "Replacement does not fit its box. Enable Fit text to box, enlarge the box, or reduce font size.",
                     )
-                baseline = r.y0 + size * f.ascender
+                baseline = r.y0 + size * (
+                    scan_top if kind == "replace_scan" else f.ascender
+                )
                 p.insert_text(
                     (r.x0, baseline),
                     op.text,

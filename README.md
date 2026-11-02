@@ -1,6 +1,6 @@
 # PDF Studio Pro
 
-Version **0.3.0** adds scanned-field replacement, reviewed regional OCR, reliable resize handles, Discard all changes, and a Windows background launcher. See [scan editing notes](docs/SCAN-EDITING.md).
+Version **0.4.0** fixes Word/XML conversion failures, adds current/checked-page conversion and OCR, native embedded-font reuse, scan appearance estimates, clearer page controls, and private phone access configuration. Developed by **Mohamed Seddiq**. See [phone setup](docs/PHONE.md) and [scan editing](docs/SCAN-EDITING.md).
 
 A local React/TypeScript + FastAPI PDF workspace. Open real PDFs, replace supported native text using actual content redaction, organize pages, insert images/signatures, annotate, convert documents and run local OCR. No account, paid API, telemetry, remote fonts, or external document uploads.
 
@@ -35,7 +35,7 @@ cd frontend
 npm run dev
 ```
 
-Vite proxies `/api` to the loopback backend. The production build is served by FastAPI. Do not bind this service to a public network: it is designed for a single local user, not as a multi-user hosted service.
+Vite proxies `/api` to the loopback backend. The production build is served by FastAPI. The default service accepts loopback only. Optional private phone access uses Tailscale Serve and an explicitly configured HTTPS hostname; see [phone setup](docs/PHONE.md). It remains a single-user workspace, without multi-user authentication.
 
 ## Use
 
@@ -47,7 +47,9 @@ Vite proxies `/api` to the loopback backend. The production build is served by F
 - Choose Add text, enter content and drag a box, then Insert. For images, upload then drag the placement rectangle. Drawn, uploaded and typed signatures are placed on the current page immediately, ready to reposition. Undo removes inserted content. Visual signatures are not digital certificates.
 - Thumbnails support drag sorting, keyboard sorting (Space, arrows, Space), multi-selection, rotation, deletion, duplication and blank insertion. Add pages imports another PDF with an inclusion/order preview. Split/extract exports the checked pages; repeat for each desired range.
 - Annotation tools apply standard PDF annotations. Pick the tool, then drag; comments use the Text content field. Text replacements affect content streams; annotations are separate.
-- Convert runs local PDF-to-editable-DOCX reconstruction or LibreOffice DOCX rendering. OCR adds an invisible searchable layer while preserving the original page appearance, including scanned pages with native footers; it reports per-page confidence and review text, and lets you open the result as a new document. Jobs are isolated, report progress and can be cancelled.
+- **Go to page** selects the page you edit. **Convert current page to Word** and **Remove current page** act on that page; the removal confirmation supports Undo. Conversion/OCR dialogs offer current page, checked pages or the whole document, with current page as default.
+- Native span selection detects font, size, ink color and style. Reusable embedded Latin fonts are selected automatically; unsupported scripts or missing glyphs require an explicit fallback. Scans have no font metadata: their ink and size are sampled, and recognizing the original text lets **Match scan appearance** compare three available font families. This remains an estimate.
+- Convert runs local PDF-to-editable-DOCX reconstruction or LibreOffice DOCX rendering. The scan-recognition checkbox runs OCR first for editable Word output; large scan backgrounds are omitted to avoid duplicating the text. XML-incompatible PDF controls are filtered with a warning. OCR adds an invisible searchable layer while preserving the original page appearance, including scanned pages with native footers; it reports per-page confidence and review text, and lets you open the result as a new document. Jobs are isolated, report progress and can be cancelled.
 - Export / Ctrl+S downloads a new PDF. Source files are never overwritten. An optional export password encrypts the output. Undo/redo works across revisions and page operations.
 - Refreshing the browser restores the most recent local working copy. Settings can delete that document immediately. Working directories older than the retention window are removed on server startup; this is not secure disk erasure. Stop the service and remove `.studio-data` to clear all retained files.
 

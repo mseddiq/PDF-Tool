@@ -17,3 +17,7 @@ Simple RGB/gray images retain decoded samples outside the region, together with 
 **Discard** restores the initially opened PDF, including original pages and metadata, and clears all drafts and undo/redo. The confirmation is final for that working copy; it does not overwrite the original on disk. For an old password-protected working copy whose initial revision was already pruned, reopen the source once in this version to create its reset baseline.
 
 On Windows, run setup once in the new extracted folder, then use the new desktop shortcut. It runs without a persistent console. Close an old console instance once before launching the update. Use **Settings → Quit app** to stop the background server; closing a browser tab alone leaves it running.
+
+## Appearance matching (0.4.0)
+
+New selections sample ink color, paper color and visible ink bounds. Recognize the original field and use its recognized text to compare Helvetica, Times and Courier candidates, then correct the content. **Match scan appearance** can be rerun before editing the content. The destination fits the detected ink bounds; the source erase region remains the whole selected field. Moving a field keeps its destination separate. Estimates can be wrong on neighboring labels, textured paper, mixed scripts or low-quality scans; no exact original scan font or undetectable alteration is promised. Native text instead reuses an extractable embedded font where compatible, preserving detected size/color/style; unavailable glyphs or complex scripts require an explicit fallback.

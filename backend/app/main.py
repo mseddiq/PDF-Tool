@@ -2,6 +2,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import uuid
@@ -42,6 +43,7 @@ from .schemas import (
     JobRequest,
     RegionExport,
     DiscardRequest,
+    AppearanceRequest,
 )
 from .services.pdf import apply, index
 from .services.content import text_spans
@@ -72,17 +74,31 @@ app = FastAPI(title="PDF Studio Pro", version=VERSION, lifespan=lifespan)
 @app.middleware("http")
 async def local_only(request: Request, call_next):
     host = request.headers.get("host", "").split(":")[0]
-    if host not in ("localhost", "127.0.0.1", "testserver"):
+    private_host = os.getenv("STUDIO_PRIVATE_HOST", "").strip().lower()
+    config = Path(__file__).resolve().parents[2] / ".studio-private-host"
+    if not private_host and config.is_file():
+        private_host = config.read_text("utf-8").strip().lower()
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.ts\.net", private_host):
+        private_host = ""
+    local_hosts = ("localhost", "127.0.0.1", "testserver")
+    if host not in local_hosts and not (private_host and host == private_host):
         return JSONResponse(
             {"detail": "This service accepts local connections only."}, status_code=403
         )
     origin = request.headers.get("origin")
-    if origin and origin not in (
-        f"http://{request.headers.get('host')}",
-        f"http://{host}:5173",
-        f"http://{host}:8000",
-        f"http://{host}",
-    ):
+    allowed_origins = (
+        {f"https://{private_host}"}
+        if host not in local_hosts
+        else {
+            f"http://{request.headers.get('host')}",
+            f"http://{host}:5173",
+            f"http://{host}:8000",
+            f"http://{host}",
+        }
+    )
+    if private_host:
+        allowed_origins.add(f"https://{private_host}")
+    if origin and origin not in allowed_origins:
         return JSONResponse(
             {"detail": "Cross-origin requests are not allowed."}, status_code=403
         )
@@ -454,6 +470,23 @@ def export_embedded_image(doc_id: str, pid: str, xref: int):
         )
 
 
+@app.post("/api/documents/{doc_id}/pages/{pid}/appearance")
+def appearance(doc_id: str, pid: str, body: AppearanceRequest):
+    from .services.appearance import estimate_appearance
+
+    with locked(doc_id):
+        state = load(doc_id)
+        expect(state, body.revision)
+        with fitz.open(current(doc_id, state)) as pdf:
+            try:
+                data = region_png(
+                    pdf[index(page_ids(state), pid)], body.rect, 144, False
+                )
+                return estimate_appearance(data, body.rect, body.text)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+
 @app.post("/api/documents/{doc_id}/pages/{pid}/region-png")
 def export_region(doc_id: str, pid: str, body: RegionExport):
     with locked(doc_id):
@@ -537,6 +570,18 @@ def create_job(doc_id: str, body: JobRequest):
         state = load(doc_id)
         if (body.kind == "word_pdf") != (state["kind"] == "docx"):
             raise HTTPException(422, "Choose a conversion matching the document type.")
+        if body.page_ids is not None:
+            if (
+                body.kind not in ("docx", "ocr")
+                or not body.page_ids
+                or len(set(body.page_ids)) != len(body.page_ids)
+            ):
+                raise HTTPException(
+                    422, "Choose distinct pages for Word conversion or OCR."
+                )
+            requested = set(body.page_ids)
+            if not requested.issubset(set(page_ids(state))):
+                raise HTTPException(422, "Selected pages are no longer available.")
         if body.kind == "ocr_region":
             if not body.page_id or not body.rect:
                 raise HTTPException(422, "Select a page region first.")
@@ -567,6 +612,26 @@ def create_job(doc_id: str, body: JobRequest):
             if body.kind == "word_pdf"
             else current(doc_id, state),
             source,
+        )
+        if body.page_ids is not None:
+            with fitz.open(source) as selected_pdf:
+                selected_pdf.select(
+                    [
+                        i
+                        for i, pid in enumerate(page_ids(state))
+                        if pid in set(body.page_ids)
+                    ]
+                )
+                subset = source.with_name(source.stem + "-subset.pdf")
+                selected_pdf.save(subset, garbage=4, deflate=True)
+            source.unlink()
+            subset.replace(source)
+        job["page_count"] = (
+            len(body.page_ids)
+            if body.page_ids is not None
+            else len(page_ids(state))
+            if state["kind"] == "pdf"
+            else None
         )
         POOL.submit(run_job, job, source, body, state["revision"])
     return public_job(job)

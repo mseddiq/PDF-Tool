@@ -25,6 +25,7 @@ export type Span = {
   text: string;
   rect: Rect;
   font: string;
+  can_reuse_font?: boolean;
   size: number;
   color: string;
   flags: number;
@@ -45,7 +46,7 @@ export type Objects = {
   warning: string;
 };
 type Style = {
-  font?: "helv" | "tiro" | "cour";
+  font?: "helv" | "tiro" | "cour" | "original";
   text?: string;
   font_size?: number;
   fit_text?: boolean;

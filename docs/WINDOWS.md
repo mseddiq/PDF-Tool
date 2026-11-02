@@ -32,3 +32,7 @@ Open the PDF, choose **Extract signature PNG**, and drag a tight rectangle aroun
 Follow [Edit scanned fields](SCAN-EDITING.md). OCR makes scan text searchable; it does not turn the original image into ordinary editable text. Version 0.3.0 provides a separate scanned-field replacement workflow, with an original-area preview and optional reviewed OCR.
 
 If the app fails to open without a console, inspect `.studio-data/desktop.log` in the extracted folder. The desktop shortcut uses the local `pythonw.exe` directly. `Start-PDF-Studio.cmd` may briefly open a launch window, then exits. Re-run setup after updating to recreate the shortcut.
+
+## Phone and page controls (0.4.0)
+
+Use **Go to page** to edit one page. **Convert current page to Word** and **Remove current page** act on that page; conversion/OCR can use checked pages or the whole document if explicitly selected. Enable scan recognition in the Word dialog for editable text from scanned pages. See [private phone setup](PHONE.md) to access the PC from Android/iPhone through your own Tailscale network.

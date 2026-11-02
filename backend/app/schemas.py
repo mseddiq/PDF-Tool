@@ -31,7 +31,7 @@ class Operation(BaseModel):
     source_rect: tuple[float, float, float, float] | None = None
     text: str = Field(default="", max_length=100000)
     original: str | None = None
-    font: Literal["helv", "tiro", "cour"] = "helv"
+    font: Literal["helv", "tiro", "cour", "original"] = "helv"
     fit_text: bool = True
     background_color: str = "#ffffff"
     font_size: float = Field(default=12, ge=4, le=300)
@@ -86,6 +86,8 @@ class JobRequest(BaseModel):
     rect: tuple[float, float, float, float] | None = None
     dpi: int = Field(default=300, ge=150, le=600)
     recognition_mode: Literal["auto", "line", "numbers"] = "auto"
+    page_ids: list[str] | None = Field(default=None, max_length=2000)
+    ocr_first: bool = False
 
 
 class DiscardRequest(BaseModel):
@@ -98,3 +100,7 @@ class RegionExport(BaseModel):
     rect: tuple[float, float, float, float]
     dpi: int = Field(default=300, ge=72, le=600)
     remove_white: bool = False
+
+
+class AppearanceRequest(RegionExport):
+    text: str = Field(default="", max_length=500)

@@ -58,3 +58,7 @@ powershell -NoProfile -File scripts/install-ocr-languages.ps1 -DataDirectory "C:
 ```
 
 Repeat to check checksum verification and reuse. The workflow in .github/workflows/verify.yml configures Linux and Windows backend/browser checks using actual document tools and retains synthetic artifacts. Its remote results must be observed before claiming Windows CI passed. CI does not exercise every interactive winget installer prompt, machine policy, antivirus product or Windows 11 Pro desktop setting.
+
+## 0.4.0 additions
+
+New checks cover printable Unicode versus forbidden XML controls, real DOCX reconstruction with injected parser controls, detected Word font styling, page-scoped Word and OCR output, invalid page selections, OCR-before-Word editable output, reusable embedded fonts and missing-glyph atomic rejection, scan appearance on all four rotations, and explicit private HTTPS hostname/origin guards. Browser cases cover page selection → Word download → single-page removal, automatic embedded face/size/color, developer credit and a 390-pixel phone viewport. These responsive tests do not substitute for real Android/iOS and Tailscale device testing.

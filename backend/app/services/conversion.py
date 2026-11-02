@@ -66,11 +66,24 @@ def word_to_pdf(source, destination, cancel):
             shutil.copyfile(result, destination)
 
 
+def xml_text(value):
+    """OOXML allows XML 1.0 characters, not arbitrary PDF control codes."""
+    return "".join(
+        c
+        for c in (value or "")
+        if c in "\t\n\r"
+        or 0x20 <= ord(c) <= 0xD7FF
+        or 0xE000 <= ord(c) <= 0xFFFD
+        or 0x10000 <= ord(c) <= 0x10FFFF
+    )
+
+
 def pdf_to_word(source, destination, mode, cancel, progress):
     out = Document()
     warnings = [
         "PDF-to-Word reconstruction is approximate. Review reading order, tables, fonts, and page breaks."
     ]
+    removed_controls = False
     with fitz.open(source) as pdf:
         for n, page in enumerate(pdf):
             checkpoint(cancel)
@@ -91,11 +104,28 @@ def pdf_to_word(source, destination, mode, cancel, progress):
                 table.style = "Table Grid"
                 for row_n, row in enumerate(values):
                     for col_n, value in enumerate(row):
-                        table.cell(row_n, col_n).text = value or ""
+                        clean = xml_text(value)
+                        removed_controls |= clean != (value or "")
+                        table.cell(row_n, col_n).text = clean
                 table_boxes.append(fitz.Rect(found.bbox))
             blocks = page.get_text("dict", sort=True)["blocks"]
+            has_ocr = any(
+                span.get("alpha", 255) == 0
+                for block in blocks
+                for line in block.get("lines", [])
+                for span in line["spans"]
+            )
             for block in blocks:
                 if block["type"] == 1:
+                    if (
+                        has_ocr
+                        and fitz.Rect(block["bbox"]).get_area()
+                        > page.rect.get_area() * 0.65
+                    ):
+                        warnings.append(
+                            f"Scan background on page {n + 1} omitted so recognized text is editable; layout needs review."
+                        )
+                        continue
                     try:
                         out.add_picture(
                             io.BytesIO(block["image"]),
@@ -118,7 +148,10 @@ def pdf_to_word(source, destination, mode, cancel, progress):
                         )
                         para.paragraph_format.space_after = Pt(0)
                     for span in line["spans"]:
-                        run = para.add_run(span["text"])
+                        clean = xml_text(span["text"])
+                        removed_controls |= clean != span["text"]
+                        run = para.add_run(clean)
+                        run.font.name = xml_text(span["font"].split("+", 1)[-1])
                         run.font.size = Pt(span["size"])
                         run.bold = bool(span["flags"] & 16)
                         run.italic = bool(span["flags"] & 2)
@@ -137,6 +170,10 @@ def pdf_to_word(source, destination, mode, cancel, progress):
                     f"Page {n + 1} has no native text. Run OCR before converting."
                 )
             progress((n + 1) / len(pdf))
+    if removed_controls:
+        warnings.append(
+            "Unsupported PDF control characters were removed for Word/XML compatibility; review the converted text."
+        )
     out.save(destination)
     return list(dict.fromkeys(warnings))
 

@@ -760,3 +760,100 @@ test("desktop Quit UI stops the app and shows a closed state", async ({
     page.getByRole("heading", { name: "PDF Studio Pro has closed" }),
   ).toBeVisible();
 });
+
+test("page selector converts only the active page and removes it independently", async ({
+  page,
+}) => {
+  const pdf = generate(
+    "import pymupdf as f,sys;d=f.open();[(d.new_page().insert_text((72,90),'Unique page '+str(i))) for i in range(1,4)];sys.stdout.buffer.write(d.tobytes())",
+  );
+  const d = await open(page, pdf);
+  await page
+    .getByLabel("Go to page", { exact: true })
+    .selectOption(d.pages[1].id);
+  await expect(
+    page.getByLabel("Edit text Unique page 2", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Convert current page to Word", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Pages to convert", { exact: true }),
+  ).toHaveValue("current");
+  await page.getByRole("button", { name: "Convert to editable DOCX" }).click();
+  await expect(page.getByRole("dialog")).toContainText("done", {
+    timeout: 30000,
+  });
+  const file = await downloaded(page, "Download result");
+  const text = generate(
+    `from docx import Document;d=Document(${JSON.stringify(file)});print(' '.join(p.text for p in d.paragraphs))`,
+  ).toString();
+  expect(text).toContain("Unique page 2");
+  expect(text).not.toContain("Unique page 1");
+  expect(text).not.toContain("Unique page 3");
+  await page.getByRole("button", { name: "Close dialog", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Remove current page", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Remove this page", exact: true })
+    .click();
+  await revision(page, 1);
+  expect(inspect(await exportPdf(page)).text.join(" ")).not.toContain(
+    "Unique page 2",
+  );
+});
+
+test("native text auto-detects embedded face, size and color", async ({
+  page,
+}) => {
+  const pdf = generate(
+    "import pymupdf as f,sys;d=f.open();p=d.new_page();p.insert_text((72,100),'Original 2026',fontname='Custom',fontfile='backend/app/fonts/DejaVuSans.ttf',fontsize=18,color=(.25,.35,.45));sys.stdout.buffer.write(d.tobytes())",
+  );
+  await open(page, pdf);
+  await page.getByLabel("Edit text Original 2026", { exact: true }).click();
+  await expect(page.getByLabel("Font family", { exact: true })).toHaveValue(
+    "original",
+  );
+  await expect(page.getByLabel("Size", { exact: true })).toHaveValue("18");
+  await expect(page.getByLabel("Text color", { exact: true })).not.toHaveValue(
+    "#172033",
+  );
+  await page.getByLabel("Text content", { exact: true }).fill("Original 2027");
+  await page
+    .getByRole("button", { name: "Apply text replacement", exact: true })
+    .click();
+  await revision(page, 1);
+  expect(inspect(await exportPdf(page)).text[0]).toContain("Original 2027");
+});
+
+test("phone layout supports page selection and conversion with developer credit", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await expect(
+    page.getByText("Developed by Mohamed Seddiq", { exact: true }),
+  ).toBeVisible();
+  const d = await open(page);
+  await page
+    .getByLabel("Go to page", { exact: true })
+    .selectOption(d.pages[1].id);
+  await page
+    .getByRole("button", { name: "Convert current page to Word", exact: true })
+    .click();
+  await expect(
+    page.getByLabel("Pages to convert", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Pages to convert", { exact: true }),
+  ).toHaveValue("current");
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  expect(await page.locator("link[rel=manifest]").getAttribute("href")).toBe(
+    "/manifest.webmanifest",
+  );
+});

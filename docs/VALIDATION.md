@@ -1,4 +1,21 @@
-# Validation evidence — 0.3.0 scan and desktop update
+# Validation evidence — 0.4.0 page, conversion and appearance update
+
+Validated locally on 2026-11-02 using the existing Linux Python 3.12, LibreOffice and English/Arabic Tesseract setup.
+
+- Full browser suite: **43 passed**. New cases exercise page selector → one-page Word conversion → one-page removal, detected embedded font/size/color and replacement export, developer credit, and a 390-pixel responsive phone viewport.
+- Full backend suite: **72 passed** (one upstream Starlette/AnyIO deprecation warning). New coverage includes XML filtering while preserving printable Unicode/Arabic/emoji; reopened Word style/text; page-limited Word/OCR output and invalid selections; OCR-before-Word editable scan text; original embedded-font reuse and atomic missing-glyph errors; scan ink/size estimates on four page rotations; private hostname/HTTPS-origin enforcement, including a reverse proxy that rewrites Host to loopback.
+- TypeScript/Vite production build, Ruff E9/F63/F7/F82, PowerShell parsing/native prerequisites and git diff --check passed.
+- The supplied nine-page PDF converted successfully and reopened with nine Word sections. Its XML-control filtering warning was observed. Date-region estimates chose a serif candidate and sampled the scan's gray ink. This validation ran locally; no supplied PDF, extracted content, Word output or page image is committed or uploaded to CI.
+
+Font matching on scans compares three available candidates and remains approximate; ink bounds/colors can include nearby marks. Native embedded-font reuse is limited to compatible Latin text and available glyphs. Word reconstruction is approximate and can omit large scan backgrounds when using OCR text to avoid duplicate visible content. Review output.
+
+Phone testing covers responsive desktop-browser emulation and HTTP access-policy checks. Actual Android/iOS file workflows, home-screen installation and the PC-to-phone Tailscale connection require testing on the owner's hardware. No private network or public deployment was activated by this change. The owner must configure Tailscale membership/access policy; the app has no multi-user login. See [phone instructions](PHONE.md).
+
+Remote Windows/Linux results for this update are added below after observation. Prior releases' CI successes do not establish this update's status.
+
+## Earlier release evidence
+
+### 0.3.0 scan and desktop update
 
 Local validation completed on 2026-11-02:
 

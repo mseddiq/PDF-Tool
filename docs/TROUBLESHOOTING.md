@@ -21,3 +21,8 @@
 - **Resize is hard:** use the larger edge/corner handles; focus a handle and use arrows, or Shift+arrows for 10-point steps. Fit text to box avoids tiny OCR-box overflow.
 - **Console still open after update:** stop the old console instance once, run Setup-Windows.cmd in the new extracted folder, then launch using the new desktop shortcut. Setup and the developer PowerShell launcher still use consoles.
 - **Want to start over:** toolbar **Discard**, then confirm **Discard all changes**. This restores the initially opened PDF and clears undo/redo.
+
+- **Word conversion reports XML / NULL / control characters:** update to 0.4.0. Conversion removes characters that cannot be represented in Word XML and reports a review warning. Arabic, printable Unicode, tabs and newlines are retained.
+- **Convert one page:** Go to page → Convert current page to Word. The conversion dialog can alternatively use checked pages or the whole document. For scans, enable Recognize scan text before Word conversion.
+- **Font still looks different:** native font reuse needs an extractable font with replacement glyphs. Scans have no embedded font to recover; recognize the original field and use Match scan appearance, then review the estimate.
+- **Phone access:** follow [the private phone guide](PHONE.md); a working PC and a private Tailscale network are required.

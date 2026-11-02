@@ -33,7 +33,27 @@ if __name__ == "__main__":
         if kind == "word_pdf":
             word_to_pdf(Path(source), Path(output), cancel)
         elif kind == "docx":
-            extra["warnings"] = pdf_to_word(source, output, mode, cancel, progress)
+            if options.get("ocr_first"):
+                recognized = Path(output).with_suffix(".ocr-input.pdf")
+                try:
+                    ocr_pdf(
+                        source,
+                        recognized,
+                        language,
+                        cancel,
+                        lambda value: progress(value * 0.6),
+                    )
+                    extra["warnings"] = pdf_to_word(
+                        recognized,
+                        output,
+                        mode,
+                        cancel,
+                        lambda value: progress(0.6 + value * 0.4),
+                    )
+                finally:
+                    recognized.unlink(missing_ok=True)
+            else:
+                extra["warnings"] = pdf_to_word(source, output, mode, cancel, progress)
         elif kind == "ocr_region":
             extra["region"] = recognize_region(
                 source,

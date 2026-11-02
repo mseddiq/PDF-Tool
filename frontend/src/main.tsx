@@ -122,7 +122,9 @@ function App() {
     [modal, setModal] = useState(""),
     [text, setText] = useState(""),
     [fontSize, setFontSize] = useState(16),
-    [fontFamily, setFontFamily] = useState<"helv" | "tiro" | "cour">("helv"),
+    [fontFamily, setFontFamily] = useState<
+      "helv" | "tiro" | "cour" | "original"
+    >("helv"),
     [color, setColor] = useState("#273447"),
     [bold, setBold] = useState(false),
     [italic, setItalic] = useState(false),
@@ -149,6 +151,8 @@ function App() {
     [job, setJob] = useState<Job | null>(null),
     [language, setLanguage] = useState("eng"),
     [mode, setMode] = useState("editable"),
+    [pageScope, setPageScope] = useState("current"),
+    [ocrFirst, setOcrFirst] = useState(false),
     [password, setPassword] = useState("");
   const [health, setHealth] = useState<{
       libreoffice: boolean;
@@ -363,7 +367,14 @@ function App() {
             bold !== !!(span.flags & 16) ||
             italic !== !!(span.flags & 2) ||
             underline ||
-            fontFamily !== "helv"))
+            fontFamily !==
+              (span.can_reuse_font
+                ? "original"
+                : /times|serif|roman/i.test(span.font)
+                  ? "tiro"
+                  : /courier|mono/i.test(span.font)
+                    ? "cour"
+                    : "helv")))
       ) {
         setError(
           "Apply the text edit or place the pending image before exporting. Escape cancels the selection.",
@@ -506,6 +517,16 @@ function App() {
   };
   function pickSpan(s: Span) {
     setSpan(s);
+    setInspectorOpen(true);
+    setFontFamily(
+      s.can_reuse_font
+        ? "original"
+        : /times|serif|roman/i.test(s.font)
+          ? "tiro"
+          : /courier|mono/i.test(s.font)
+            ? "cour"
+            : "helv",
+    );
     if (s.source === "ocr" && page) {
       const b = page.bounds;
       setScanField({
@@ -611,11 +632,15 @@ function App() {
     setRect(r);
     setSpan(null);
     if (tool === "text") {
+      setInspectorOpen(true);
       setTextPending(true);
       return;
     }
     if (tool === "scan_text") {
       setScanField({ page_id: page.id, source_rect: r });
+      setFontFamily("helv");
+      setInspectorOpen(true);
+      void matchAppearance(r, "");
       setScanDirty(false);
       setText("");
       setFitText(true);
@@ -685,6 +710,32 @@ function App() {
       setTool(imageXref ? "select" : "image");
     });
   }
+  async function matchAppearance(region: Rect, content = text) {
+    if (!doc || !page) return;
+    await run(async () => {
+      const a = await api<{
+        font: "helv" | "tiro" | "cour";
+        font_size: number;
+        color: string;
+        background_color: string;
+        ink_rect: Rect;
+        warning: string;
+      }>(
+        `/documents/${doc.id}/pages/${page.id}/appearance`,
+        json({
+          revision: doc.revision,
+          rect: region,
+          text: content.slice(0, 500),
+        }),
+      );
+      setFontFamily(a.font);
+      setFontSize(a.font_size);
+      setColor(a.color);
+      setBackgroundColor(a.background_color);
+      if (!scanField?.moved) setRect(a.ink_rect);
+      setMessage(a.warning);
+    });
+  }
   function startJob(kind: string) {
     if (!doc) return;
     if (
@@ -701,7 +752,27 @@ function App() {
     }
     void run(async () => {
       setJob(
-        await api(`/documents/${doc.id}/jobs`, json({ kind, language, mode })),
+        await api(
+          `/documents/${doc.id}/jobs`,
+          json({
+            kind,
+            language,
+            mode,
+            ...(kind === "docx" || kind === "ocr"
+              ? {
+                  page_ids:
+                    pageScope === "all"
+                      ? null
+                      : pageScope === "selected"
+                        ? chosen
+                        : page
+                          ? [page.id]
+                          : [],
+                  ocr_first: kind === "docx" && ocrFirst,
+                }
+              : {}),
+          }),
+        ),
       );
       setModal("jobs");
     });
@@ -980,6 +1051,7 @@ function App() {
                   className={tool === t.id ? "tool active-tool" : "tool"}
                   onClick={() => {
                     setTool(t.id);
+                    setFontFamily("helv");
                     setSpan(null);
                     setImageXref(null);
                     setScanField(null);
@@ -1026,6 +1098,44 @@ function App() {
                   onClick={() => setSideOpen(false)}
                 >
                   <PanelLeft />
+                </button>
+              </div>
+              <div className="page-scope-panel">
+                <label>
+                  Go to page
+                  <select
+                    aria-label="Go to page"
+                    value={page?.id || ""}
+                    onChange={(e) => {
+                      setActive(e.target.value);
+                      setSelected([e.target.value]);
+                    }}
+                  >
+                    {doc.pages.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        Page {p.number}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>
+                  Editing page {page?.number}. Check thumbnails for multiple
+                  pages.
+                </p>
+                <button
+                  onClick={() => {
+                    setPageScope("current");
+                    setModal("convert");
+                  }}
+                >
+                  Convert current page to Word
+                </button>
+                <button
+                  className="danger"
+                  disabled={busy || doc.pages.length <= 1}
+                  onClick={() => setModal("remove_page")}
+                >
+                  Remove current page
                 </button>
               </div>
               <div className="page-actions">
@@ -1307,8 +1417,11 @@ function App() {
                 </div>
                 {span && !scanField && (
                   <p className="hint">
-                    Original: {span.font}. Replacement uses a fallback font.
-                    Original text is removed from the export.
+                    Detected: {span.font} · {span.size.toFixed(1)} pt ·{" "}
+                    {span.color}.
+                    {fontFamily === "original"
+                      ? " Original embedded font is reused when it contains the replacement characters."
+                      : " A matching font family is selected; exact original font is unavailable or fallback was chosen."}
                   </p>
                 )}
                 {scanField && doc && page && (
@@ -1387,6 +1500,20 @@ function App() {
                     >
                       Recognize selected field
                     </button>
+                    <button
+                      className="wide-button"
+                      disabled={busy}
+                      onClick={() =>
+                        void matchAppearance(scanField.source_rect)
+                      }
+                    >
+                      Match scan appearance
+                    </button>
+                    <p className="hint">
+                      Scan font, size and ink color are estimates. For best
+                      matching, recognize the original field first, then match
+                      before changing its text.
+                    </p>
                     <button
                       className="wide-button"
                       onClick={() => {
@@ -1502,6 +1629,7 @@ function App() {
                     <label>
                       Text content
                       <textarea
+                        aria-label="Text content"
                         value={text}
                         onChange={(e) => {
                           setText(e.target.value);
@@ -1549,6 +1677,11 @@ function App() {
                           if (scanField) setScanDirty(true);
                         }}
                       >
+                        {span?.can_reuse_font && (
+                          <option value="original">
+                            Original · {span.font}
+                          </option>
+                        )}
                         <option value="helv">Helvetica · Latin fallback</option>
                         <option value="tiro">Times · Latin fallback</option>
                         <option value="cour">Courier · Latin fallback</option>
@@ -1882,7 +2015,7 @@ function App() {
               <i>·</i>
               {(doc.size / 1024).toFixed(1)} KB<i>·</i>Revision {doc.revision}
             </span>
-            <span>PDF Studio Pro · 0.3.0</span>
+            <span>Developed by Mohamed Seddiq · 0.4.0</span>
           </footer>
         </>
       ) : (
@@ -1895,6 +2028,7 @@ function App() {
             <br />
             <span>Without the busywork.</span>
           </h1>
+          <p className="developer-credit">Developed by Mohamed Seddiq</p>
           <p className="home-description">
             Edit, organize, and make every PDF your own.
             <br />A complete workspace. Everything stays on your device.
@@ -2005,6 +2139,7 @@ function App() {
                     discard: "Discard all changes",
                     quit: "Quit PDF Studio Pro",
                     convert: "Convert documents",
+                    remove_page: "Remove current page",
                     ocr: "Make your PDF searchable",
                     signature: "Your signature",
                     extract_signature: "Export signature as PNG",
@@ -2120,6 +2255,27 @@ function App() {
                 </button>
               </>
             ) : null}
+            {modal === "remove_page" && (
+              <>
+                <p>
+                  Remove page {page?.number}? Other pages stay unchanged. You
+                  can Undo this action.
+                </p>
+                <button
+                  className="primary wide-button danger"
+                  onClick={() =>
+                    void mutate({
+                      kind: "delete_pages",
+                      page_ids: page ? [page.id] : [],
+                    }).then((next) => {
+                      if (next) setModal("");
+                    })
+                  }
+                >
+                  Remove this page
+                </button>
+              </>
+            )}
             {modal === "convert" && (
               <>
                 <p>
@@ -2151,6 +2307,45 @@ function App() {
                 ) : (
                   <>
                     <label>
+                      Pages to convert
+                      <select
+                        aria-label="Pages to convert"
+                        value={pageScope}
+                        onChange={(e) => setPageScope(e.target.value)}
+                      >
+                        <option value="current">
+                          Current page ({page?.number})
+                        </option>
+                        <option value="selected">
+                          Checked pages ({chosen.length})
+                        </option>
+                        <option value="all">
+                          Whole document ({doc.pages.length})
+                        </option>
+                      </select>
+                    </label>
+                    <label className="check-label">
+                      <input
+                        type="checkbox"
+                        checked={ocrFirst}
+                        onChange={(e) => setOcrFirst(e.target.checked)}
+                      />
+                      Recognize scan text before Word conversion
+                    </label>
+                    {ocrFirst && (
+                      <label>
+                        Word OCR language
+                        <select
+                          value={language}
+                          onChange={(e) => setLanguage(e.target.value)}
+                        >
+                          <option value="eng">English</option>
+                          <option value="ara">Arabic</option>
+                          <option value="eng+ara">English + Arabic</option>
+                        </select>
+                      </label>
+                    )}
+                    <label>
                       Reconstruction mode
                       <select
                         value={mode}
@@ -2165,8 +2360,9 @@ function App() {
                       </select>
                     </label>
                     <p className="hint">
-                      Scanned pages need OCR first. Tables, columns and headers
-                      may need manual correction.
+                      Select scan recognition above to produce editable text
+                      from images. Tables, columns and headers may need manual
+                      correction.
                     </p>
                     <button
                       className="primary wide-button"
@@ -2184,6 +2380,24 @@ function App() {
                   Add an invisible searchable text layer to scanned pages.
                   Native-text pages are preserved. Recognition is approximate.
                 </p>
+                <label>
+                  Pages to recognize
+                  <select
+                    aria-label="Pages to recognize"
+                    value={pageScope}
+                    onChange={(e) => setPageScope(e.target.value)}
+                  >
+                    <option value="current">
+                      Current page ({page?.number})
+                    </option>
+                    <option value="selected">
+                      Checked pages ({chosen.length})
+                    </option>
+                    <option value="all">
+                      Whole document ({doc?.pages.length})
+                    </option>
+                  </select>
+                </label>
                 <label>
                   Recognition language
                   <select
@@ -2367,6 +2581,11 @@ function App() {
                         }
                         onClick={() => {
                           setText(job.region!.text);
+                          if (scanField)
+                            void matchAppearance(
+                              scanField.source_rect,
+                              job.region!.text,
+                            );
                           setScanDirty(true);
                           setModal("");
                           setMessage(

@@ -48,3 +48,11 @@ A larger customer-document corpus of Arabic, signed, embedded-font, rotated, tab
 Selected raster regions can be replaced independently of the OCR layer. An original-area preview and English/Arabic regional OCR (line, block or numbers/date mode; 300–600 DPI) support manual correction before applying. Simple RGB/gray raster samples and compatible masks are changed locally, preserving other decoded samples; complex images use MuPDF pixel redaction. Layered/compressed masks can show slight rendering differences outside the selected field after re-encoding. Exact font/background/texture matching and paragraph reflow are not guaranteed.
 
 A persistent baseline enables Discard all changes even after revision pruning. Windows desktop launch uses pythonw and a no-console background service; Settings can stop it. Installation windows and manual developer launchers still use consoles.
+
+## Page, font and phone update (0.4.0)
+
+Conversion and full-page OCR accept a validated page subset; the UI defaults to the current page and offers checked/all pages explicitly. The source working copy is unchanged by jobs. Word reconstruction filters XML-incompatible controls in text and table cells, preserves printable Unicode and sets detected font names. Optional OCR-before-Word produces editable scan text and omits large scan backgrounds to avoid duplicate visible content; Word layout remains approximate.
+
+Native Latin text can reuse a matching extractable embedded font; missing glyphs, changed bold/italic or complex scripts require explicit fallback. Size, color and style are detected on selection. Scan appearance estimates sample ink/background and compare only three available typefaces; they are not exact font identification.
+
+Phone browser controls support narrower screens, page selection and conversion, with a home-screen shortcut manifest. [Private Tailscale Serve setup](PHONE.md) uses a specific configured HTTPS hostname and preserves loopback binding and origin checks. There is no multi-user login; membership/access policy must limit this service to the owner's devices. PC processing must remain available. Actual Android/iOS devices and Tailscale connectivity need validation on the owner's hardware.
